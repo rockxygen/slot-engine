@@ -20,6 +20,22 @@ const TEST_CONFIG: GameConfig = {
   },
   scatter: { symbol: 'scatter', pays: { 3: 2, 4: 10, 5: 50 } },
   wild: 'wild',
+  link: {
+    symbol: 'link',
+    triggerCount: 6,
+    respinCount: 3,
+    cellCount: 15,
+    values: { 1: 100 },
+    jackpotChance: 0,
+    jackpots: {
+      mini: { weight: 1, multiplier: 10 },
+      minor: { weight: 1, multiplier: 20 },
+      major: { weight: 1, multiplier: 100 },
+      grand: { weight: 1, multiplier: 500 },
+    },
+    stepCounts: { 0: 1 },
+  },
+  freeSpins: { award: { 3: 7, 4: 10, 5: 15 }, multiplier: 2, retriggerAward: 5 },
 }
 
 const BET = 200 // 2 çizgi → lineBet = 100

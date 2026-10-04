@@ -1,36 +1,76 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🍀 Clover Link Bells — Slot Engine
 
-## Getting Started
+Clover Link tarzı (klasik meyve + Link respin bonusu) slot oyununun **matematik
+motoru** ve Next.js 16 sarmalayıcısı. Hedef: **gerçek para / lisanslı** kullanım
+(GLI-19 tipi RNG denetimine hazır yapı).
 
-First, run the development server:
+> Motor **saf TypeScript**'tir — sunucuda sonuç üretir, istemci yalnızca
+> oynatır. Client'ta hiçbir matematik yoktur.
+
+## Komutlar
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run dev        # Next.js geliştirme sunucusu
+npm test           # Vitest (47 test: RNG, değerlendirme, bonus, sim)
+npm run typecheck  # tsc --noEmit
+npm run lint       # eslint
+npm run sim -- 1000000 <seed> [bet]   # RTP/volatilite simülasyonu
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Mimari
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+src/lib/engine/          # SAF MOTOR (framework'süz, sunucu+istemci ortak)
+  rng.ts                 # Deterministik seed'li PRNG (sfc32+xmur3), state kaydetme
+  config.ts              # Oyun VERİSİ: şeritler, paytable, çizgiler, bonus kuralları
+  reels.ts               # Strip + window makara modeli
+  evaluate.ts            # Çizgi/scatter kazancı, wild substitution, both-ways
+  spin.ts                # Tek spin (base grid)
+  bonus.ts               # Link respin bonusu + Free spins serisi
+  round.ts               # playRound(): base → link → freeSpins orkestrasyonu
+  simulate.ts / sim-cli  # Monte Carlo RTP harness'i (kalibrasyon aracı)
+  *.test.ts              # 47 test
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Oyun kuralları (v1)
 
-## Learn More
+- **5 makara × 3 satır, 20 çizgi, both-ways** (LTR + RTL), para **tamsayı**
+  minor birimde (kuruş) — kayan nokta hatası yok.
+- **Wild** her sembolün yerine geçer; **scatter** gridde her yerde 3+ öder.
+- **Link respin bonusu**: 6+ `link` sembolü → 3 hak; dolu adımda hak sıfırlanır,
+  boş adımda azalır. Hücre değerleri bet çarpanıdır; %3 şansla jackpot kademesi
+  (mini 10× · minor 20× · major 100× · grand 500×) düşer.
+- **Free spins**: 3+ scatter → 13/19/26 dönüş, tüm kazançlar **×4**;
+  FS içinde 3+ scatter **+5** (retrigger, toplam 50 ile sınırlı).
 
-To learn more about Next.js, take a look at the following resources:
+## Kalibre edilmiş matematik (5M×2 spin doğrulaması)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Metrik | Değer |
+| --- | --- |
+| **Toplam RTP** | **~%96** (hedef %96.00) |
+| base game | ~%59.8 |
+| link bonusu | ~%12.5 · tetik **1/333** · ort. 14.2 hücre |
+| free spins | ~%23.5 · tetik **1/140** |
+| Hit rate | ~%47 |
+| Max win | ~1030× bahis |
+| Volatilite (σ) | ~5.8× bahis |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Ayrıntılar: [`docs/CALIBRATION.md`](docs/CALIBRATION.md)
 
-## Deploy on Vercel
+## Determinizm / denetim sözleşmesi
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. `createRng(seed)` → aynı seed her platformda **aynı** sonuç zinciri üretir
+   (salt 32-bit tamsayı aritmetiği).
+2. `playRound(config, rng, bet)` → base + link + freeSpins **tek RNG
+   akışından** üretilir; sırası sabittir ve kayda girer.
+3. Sunucu turu üretir, seed/sonuç zincirini hash'leyerek saklar → denetçi
+   replay edebilir. İstemci sadece `SpinRound` verisini oynatır.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Yol haritası
+
+- [x] **Faz 1** — Matematik çekirdeği (RNG, şerit, değerlendirme, sim harness)
+- [x] **Faz 2** — Bonus mekaniği (Link respin + Free spins) ve **RTP kalibrasyonu → %96**
+- [ ] **Faz 3** — Otoriter spin endpoint'i + cüzdan (BET/WIN ledger)
+- [ ] **Faz 4** — Phaser istemcisi (reel animasyonları, bonus sahneleri)
+- [ ] **Faz 5** — Property-based test + CI RTP kapısı + sertifikasyon hazırlığı
+- [ ] **Faz 6** — Telemetri, config versiyonlama, yayın

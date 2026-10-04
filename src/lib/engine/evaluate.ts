@@ -94,15 +94,19 @@ export function evaluateGrid(
     }
   })
 
-  // Scatter: tüm grid'de sayılır, totalBet üzerinden öder
+  // Scatter: tüm grid'de sayılır, totalBet üzerinden öder.
+  // 5+ scatter, paytable'daki en yüksek anahtar kadar sayılır (clamp).
   const scatterSymbol = config.scatter.symbol
   let scatterCount = 0
   for (const column of columns) {
     for (const s of column) if (s === scatterSymbol) scatterCount++
   }
-  const scatterMultiplier = config.scatter.pays[scatterCount]
+  const pays = config.scatter.pays
+  const maxPayKey = Math.max(...Object.keys(pays).map(Number))
+  const capped = Math.min(scatterCount, maxPayKey)
+  const scatterMultiplier = pays[capped]
   const scatterWin: ScatterWin | null =
-    scatterMultiplier !== undefined
+    scatterCount >= Math.min(...Object.keys(pays).map(Number)) && scatterMultiplier !== undefined
       ? { count: scatterCount, multiplier: scatterMultiplier, win: scatterMultiplier * bet }
       : null
 
