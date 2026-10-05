@@ -53,8 +53,13 @@
 
 1. Her round, oynandığı anki oyun verisinin parmak izini saklar
    (`rounds.config_hash = sha256(config)`).
-2. Denetimde **R2**: bu binary'nin config'i farklıysa tur replay edilemez →
-   **FAIL** (eski config ile sürümü replay, Faz 6'da tamamlanacak).
+2. Denetimde **R2**: round'ın config hash'i bu binary'ninki gibi olmalı
+   **ya da** oynandığı sürümün snapshot dosyasıyla çözülebilmeli
+   (`config-versions.ts` — her binary ilk turda kendi sürümünü
+   `.data/config-versions/<hash>.json`'a yazar; içerik bütünlüğü dosya
+   adıyla doğrulanır). **Snapshot yoksa → FAIL**; eski config ile
+   sürüm replay'i **tamamlandı** (Faz 6, `config-versions.test.ts`:
+   sahte/bozuksa R2, doğruysa R1+R2 geçer).
 3. Matematik değişiklikleri `npm run gate` bantlarını geçmek **zorundadır**;
    bant bilinçli olarak güncellenir → değişiklik kontrolü izi.
 
@@ -65,7 +70,8 @@
 | Birim + property testler | `npm test` | RNG, değerlendirme, bonus, cüzdan, denetim motoru |
 | Tip/lint/build | `npm run typecheck && npm run lint && npm run build` | sözleşme bütünlüğü |
 | **RTP regresyon kapısı** | `npm run gate` | 2M spin (seed `rtp-gate-1`, deterministik): RTP **%95.40–96.60**, base/link/FS katkı bantları, hit %45–49, tetik frekansları, max win ≤1300×, σ bantları, bileşen toplamı ≡ RTP |
-| Denetçi replay | `npm run audit` | gerçek DB üzerinde R1–L3 |
+| Denetçi replay | `npm run audit` | gerçek DB üzerinde R1–L3 (config sürümü snapshot üzerinden, Faz 6) |
+| **Yayın zinciri** | `npm run release` | typecheck→lint→test→build→gate→audit tek komut; biri başarısızsa deploy durur (`docs/DEPLOYMENT.md`) |
 
 - Kapının kapandığı da **kanıtlanmıştır**: yetersiz spin sayısı/beklenmeyen
   seed bant dışına çıkar → `exit 1` (negatif test koşuldu).
@@ -82,6 +88,11 @@
 - [ ] Denetim loglarının WORM/uzak kopyaya akışı (yerel SQLite → prod'da
       append-only depolama/uzak kopya).
 - [ ] Limitler ve sorumlu oyun kontrolleri (kayıp limiti, oturum süresi).
-- [ ] Config sürümleme: eski config'ler saklanıp R2'de sürüm üzerinden
-      replay (Faz 6).
-- [ ] Telemetri/uzak metrik (Faz 6).
+- [x] **Config sürümleme (Faz 6 — TAMAM)**: eski config snapshot'ları
+      saklanır, R2 sürüm üzerinden replay eder; `config-versions.ts` +
+      `config-versions.test.ts` + `docs/DEPLOYMENT.md §7` (snapshot'lar
+      silinmez; yedekleme `.data/` ile birliktedir).
+- [x] **Telemetri (Faz 6 — yerel TAMAM)**: `GET /api/telemetry`
+      (süreç sayaçları + DB tüm-zamanlar + `configHash`),
+      `GET /api/health` (yazmasız liveness). Uzak metrik shipper
+      (Prometheus/loki) ortam eklentisi — bkz. `docs/DEPLOYMENT.md`.

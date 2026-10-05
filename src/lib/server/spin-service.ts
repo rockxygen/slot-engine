@@ -11,6 +11,12 @@ import {
   randomSeed,
   type SpinRound,
 } from '@/lib/engine'
+import type { GameConfig } from '@/lib/engine/types'
+import {
+  CURRENT_CONFIG_HASH,
+  ensureConfigSnapshot,
+  resolveReplayConfig,
+} from './config-versions'
 import { creditIf, getBalance, getSession } from './wallet'
 
 /// ────────────────────────────────── determinizm / denetim yardımcıları
@@ -19,19 +25,26 @@ function sha256(text: string): string {
   return createHash('sha256').update(text).digest('hex')
 }
 
-/// Oyun VERİSİ'nin parmak izi — config değişince denetçi satırları
-/// hangi matematikle üretildiğini ayırt edebilir. (Faz6'da eski
-/// config'ler saklanıp sürümüyle replay edilecek.)
-export const CURRENT_CONFIG_HASH = sha256(JSON.stringify(CLOVER_LINK_BELLS))
+export { CURRENT_CONFIG_HASH }
 
 export function roundHash(round: SpinRound): string {
   return sha256(JSON.stringify(round))
 }
 
-/// Denetçi replay'i: kayıtlı seed ile tur YENİDEN üretilir, hash
-/// karşılaştırılır. Kayıt = sonuç DEĞİL, yeniden-üretilebilir kanıttır.
-export function replayRound(seed: string, bet: number): SpinRound {
-  return playRound(CLOVER_LINK_BELLS, createRng(seed), bet)
+/**
+ * Denetçi replay'i: seed ile tur YENİDEN üretilir, hash karşılaştırılır.
+ * Kayıt = sonuç DEĞİL, yeniden-üretilebilir kanıttır.
+ *
+ * `config` verilmez (veya round'ın hash'i verilirse `replayRoundConfig`)
+ * o turun OYNANDIĞI matematik kullanılır — config değişse bile eski
+ * turlar snapshot ile replay edilebilir (Faz 6).
+ */
+export function replayRound(
+  seed: string,
+  bet: number,
+  config: GameConfig = CLOVER_LINK_BELLS,
+): SpinRound {
+  return playRound(config, createRng(seed), bet)
 }
 
 export interface RoundRow {
@@ -56,7 +69,10 @@ export function verifyRound(
     .prepare('SELECT * FROM rounds WHERE id = ?')
     .get(roundId) as RoundRow | undefined
   if (!row) return { ok: false, row: null }
-  const replayed = replayRound(row.seed, row.bet)
+  // Turun OYNANDIĞI config ile replay et (güncel binary veya snapshot)
+  const resolved = resolveReplayConfig(row.config_hash)
+  if (!resolved) return { ok: false, row } // config kaybı → doğrulanamaz
+  const replayed = replayRound(row.seed, row.bet, resolved.config)
   return { ok: roundHash(replayed) === row.round_hash, row }
 }
 
@@ -109,12 +125,26 @@ function findForceSeed(
  *    süreçte parçalanamaz; hata → ROLLBACK, hiçbir iz kalmaz.
  * 3) Sonuç `SpinRound` + gerçek bakiyedir; istemci yalnızca oynatır.
  */
+/// Bu süreçte snapshot garanti edildi mi? (round yazımından önce bir kez)
+let snapshotEnsured = false
+
 export function performSpin(
   db: DatabaseSync,
   opts: PerformSpinOptions,
 ): SpinOutcome {
   const { sessionId, clientRequestId, force = null, allowForce = false } = opts
   const bet = opts.bet
+
+  // Config snapshot'ını ilk turda materyalize et: bu binary'nin
+  // matematiği ileride (config değişse bile) denetlenebilir kalsın.
+  if (!snapshotEnsured) {
+    snapshotEnsured = true
+    try {
+      ensureConfigSnapshot()
+    } catch (err) {
+      console.error('config snapshot yazılamadı (tur etkilenmedi):', err)
+    }
+  }
 
   if (!Number.isInteger(bet) || !ALLOWED_BETS.some((b) => b === bet)) {
     return { ok: false, reason: 'invalid_bet' }

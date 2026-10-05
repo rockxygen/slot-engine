@@ -1,12 +1,8 @@
-import { openDb } from './db'
-import {
-  CURRENT_CONFIG_HASH,
-  replayRound,
-  roundHash,
-  type RoundRow,
-} from './spin-service'
-import { listLedger } from './wallet'
 import type { DatabaseSync } from 'node:sqlite'
+import { resolveReplayConfig } from './config-versions'
+import { openDb } from './db'
+import { replayRound, roundHash, type RoundRow } from './spin-service'
+import { listLedger } from './wallet'
 
 /// Denetim bulgusu — CLI raporlar, test doğrular.
 export interface Finding {
@@ -19,9 +15,10 @@ export interface Finding {
  * Denetim motoru (aracı CLI'dan bağımsız — CI'da test edilir).
  *
  * Kontroller:
- *   R1  replay: seed → playRound → sha256(round) === round_hash
- *   R2  config sürümü: round'ın config_hash'ı bu BİNARİN config'iyle
- *       aynı mı? (Değişmişse eski config gerekir → FAIL = değişiklik kontrolü)
+ *   R1  replay: seed → playRound(config) → sha256(round) === round_hash
+ *   R2  config sürümü: round'ın config_hash'ı güncel binary YAHUT
+ *       snapshot ile çözülebiliyor mu? (çözülemiyorsa FAIL — replay
+ *       mümkün değil = denetim kanıtı eksik)
  *   L1  ledger zinciri: her satırda balance_after = bir önceki + amount
  *   L2  invariant: oturumda SUM(amount) === balance (açılış dahil)
  *   L3  bağ: BET/WIN satırları kendi oturumundaki round'a bağlı
@@ -29,22 +26,30 @@ export interface Finding {
 export function runAudit(db: DatabaseSync): Finding[] {
   const findings: Finding[] = []
 
-  // ── R1 + R2: round replay + config sürümü
+  // ── R1 + R2: round replay + config sürüm çözümü (snapshot dahil)
   const rounds = db
     .prepare('SELECT * FROM rounds ORDER BY id')
     .all() as unknown as RoundRow[]
 
   let replayed = 0
+  let comparable = 0
+  let viaSnapshot = 0
+  let missingConfig = 0
   for (const r of rounds) {
-    if (r.config_hash !== CURRENT_CONFIG_HASH) {
+    const resolved = resolveReplayConfig(r.config_hash)
+    if (!resolved) {
+      missingConfig++
       findings.push({
         check: 'R2',
         ok: false,
-        detail: `round #${r.id}: config değişmiş (${r.config_hash.slice(0, 12)}… ≠ ${CURRENT_CONFIG_HASH.slice(0, 12)}…) — yeniden oynatma için eski config gerekir`,
+        detail: `round #${r.id}: config sürümü kayıp (${r.config_hash.slice(0, 12)}…) — snapshot yok, replay mümkün değil`,
       })
       continue
     }
-    const replayedHash = roundHash(replayRound(r.seed, r.bet))
+    if (resolved.source === 'snapshot') viaSnapshot++
+
+    comparable++
+    const replayedHash = roundHash(replayRound(r.seed, r.bet, resolved.config))
     if (replayedHash !== r.round_hash) {
       findings.push({
         check: 'R1',
@@ -57,9 +62,16 @@ export function runAudit(db: DatabaseSync): Finding[] {
   }
   findings.push({
     check: 'R1',
-    ok: true,
-    detail: `${replayed}/${rounds.length} round seed'den birebir yeniden üretildi`,
+    ok: replayed === comparable,
+    detail: `${replayed}/${comparable} round seed'den birebir yeniden üretildi${missingConfig > 0 ? ` (config kaydı bulunamayan: ${missingConfig})` : ''}`,
   })
+  if (viaSnapshot > 0) {
+    findings.push({
+      check: 'R2',
+      ok: true,
+      detail: `${viaSnapshot} round tarihsel config snapshot ile replay edildi (değişiklik kontrolü: dosya bütünlüğü doğrulandı)`,
+    })
+  }
 
   // ── L1 + L2: oturum bazlı ledger zinciri + invariant
   const sessions = db

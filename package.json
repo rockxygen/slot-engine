@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "sim": "tsx src/lib/engine/sim-cli.ts",
     "gate": "tsx src/lib/engine/rtp-gate-cli.ts",
-    "audit": "tsx src/lib/server/audit-cli.ts"
+    "audit": "tsx src/lib/server/audit-cli.ts",
+    "release": "npm run typecheck && npm run lint && npm test && npm run build && npm run gate && npm run audit"
   },
   "dependencies": {
     "next": "16.3.8",

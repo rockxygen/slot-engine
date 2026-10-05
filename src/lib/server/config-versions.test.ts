@@ -1,0 +1,214 @@
+import { createHash } from 'node:crypto'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { describe, expect, it } from 'vitest'
+import { createRng, playRound } from '@/lib/engine'
+import { CLOVER_LINK_BELLS } from '@/lib/engine/config'
+import type { GameConfig } from '@/lib/engine/types'
+import { auditFailed, runAudit } from './audit'
+import {
+  clearConfigSnapshotCache,
+  configHashOf,
+  configVersionsDir,
+  CURRENT_CONFIG_HASH,
+  ensureConfigSnapshot,
+  loadConfigSnapshot,
+  resolveReplayConfig,
+} from './config-versions'
+import { openDb } from './db'
+import { performSpin, roundHash } from './spin-service'
+import { createSession, getBalance } from './wallet'
+
+/// İzole snapshot dizini (configVersionsDir() çağrı anında okur)
+process.env.SLOT_CONFIG_VERSIONS_DIR = mkdtempSync(
+  join(tmpdir(), 'slot-cfgver-'),
+)
+
+const SESSION = 'cfgver-sess-1'
+
+/// "Eski sürüm" config: paytable'da iki hücre fark — hash'i başka,
+/// replay çıktısı başkadır (gerçek sürüm değişimi simülasyonu).
+function legacyConfig(): GameConfig {
+  const clone = JSON.parse(JSON.stringify(CLOVER_LINK_BELLS)) as {
+    paytable: Record<string, Record<number, number>>
+  } & Record<string, unknown>
+  clone.paytable.cherry[3] = clone.paytable.cherry[3] + 1
+  clone.paytable.cherry[5] = clone.paytable.cherry[5] + 1
+  return clone as unknown as GameConfig
+}
+
+function writeSnapshot(config: GameConfig): string {
+  const hash = configHashOf(config)
+  writeFileSync(
+    join(configVersionsDir(), `${hash}.json`),
+    `${JSON.stringify(config, null, 2)}\n`,
+  )
+  clearConfigSnapshotCache()
+  return hash
+}
+
+describe('config versiyonlama (Faz 6)', () => {
+  it('ensure: mevcut config snapshot\'ı yazılır ve bütünlüğü doğrulanır', () => {
+    const hash = ensureConfigSnapshot()
+    expect(hash).toBe(CURRENT_CONFIG_HASH)
+    expect(
+      existsSync(join(configVersionsDir(), `${CURRENT_CONFIG_HASH}.json`)),
+    ).toBe(true)
+
+    clearConfigSnapshotCache()
+    const loaded = loadConfigSnapshot(CURRENT_CONFIG_HASH)
+    expect(loaded).not.toBeNull()
+    expect(configHashOf(loaded as GameConfig)).toBe(CURRENT_CONFIG_HASH)
+    expect(resolveReplayConfig(CURRENT_CONFIG_HASH)?.source).toBe('current')
+  })
+
+  it('performSpin ilk turda snapshot\'ı otomatik materyalize eder', () => {
+    const file = join(configVersionsDir(), `${CURRENT_CONFIG_HASH}.json`)
+    rmSync(file, { force: true }) // sil → ilk spin geri yazmalı
+
+    const db = openDb(':memory:')
+    createSession(db, SESSION)
+    const out = performSpin(db, {
+      sessionId: SESSION,
+      bet: 100,
+      clientRequestId: 'cfgver-req-0001',
+    })
+    expect(out.ok).toBe(true)
+    expect(existsSync(file)).toBe(true)
+  })
+
+  it('eski config ile oynanmış tur, snapshot ile replay edilir (R1+R2 geçer)', () => {
+    const legacy = legacyConfig()
+    const legacyHash = writeSnapshot(legacy)
+
+    // Tur GERÇEKTEN eski config ile üretilmiş gibi kaydedilir
+    const db = openDb(':memory:')
+    createSession(db, SESSION)
+    const seed = 'legacy-round-seed-01'
+    const bet = 200
+    const round = playRound(legacy, createRng(seed), bet)
+    db.prepare(
+      `INSERT INTO rounds
+         (session_id, client_request_id, seed, bet, win, balance_after,
+          round_hash, config_hash, forced, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+    ).run(
+      SESSION,
+      'legacy-req-000001',
+      seed,
+      bet,
+      round.totalWin,
+      getBalance(db, SESSION),
+      roundHash(round),
+      legacyHash,
+      Date.now(),
+    )
+
+    const findings = runAudit(db)
+    expect(auditFailed(findings)).toBe(false)
+    expect(
+      findings.some((f) => f.check === 'R2' && f.ok && f.detail.includes('snapshot')),
+    ).toBe(true)
+    expect(findings.some((f) => f.check === 'R1' && f.ok)).toBe(true)
+  })
+
+  it('config_hash "yalan" söylüyorsa (round aslında farklı config ile üretilmiş) → R1 yakalar', () => {
+    const legacy = legacyConfig()
+    const legacyHash = writeSnapshot(legacy) // dosya bütünlüğü SAĞLIKLI
+
+    const db = openDb(':memory:')
+    createSession(db, SESSION)
+    const bet = 200
+    // Öyle bir seed bul ki GÜNCEL ve ESKİ config replay'leri FARKLI
+    // olsun (paytable farkının gerçekten turu etkilediği kanıtlanmış
+    // örnek) — sonra round_hash güncel, sütun eski config'i göstersin.
+    let seed: string | null = null
+    for (let i = 0; i < 5000 && !seed; i++) {
+      const s = `lying-config-seed-${i}`
+      const cur = roundHash(playRound(CLOVER_LINK_BELLS, createRng(s), bet))
+      const old = roundHash(playRound(legacy, createRng(s), bet))
+      if (cur !== old) seed = s
+    }
+    expect(seed).not.toBeNull()
+
+    const round = playRound(CLOVER_LINK_BELLS, createRng(seed as string), bet)
+    db.prepare(
+      `INSERT INTO rounds
+         (session_id, client_request_id, seed, bet, win, balance_after,
+          round_hash, config_hash, forced, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+    ).run(
+      SESSION,
+      'lying-req-000001',
+      seed as string,
+      bet,
+      round.totalWin,
+      getBalance(db, SESSION),
+      roundHash(round),
+      legacyHash,
+      Date.now(),
+    )
+
+    const findings = runAudit(db)
+    expect(findings.some((f) => f.check === 'R1' && !f.ok)).toBe(true)
+    expect(auditFailed(findings)).toBe(true)
+  })
+
+  it('snapshot dosyası bozuksa (içerik ≠ dosya adı hash\'i) → yüklenmez, R2 yakalar', () => {
+    const legacy = legacyConfig()
+    const legacyHash = configHashOf(legacy)
+    const file = join(configVersionsDir(), `${legacyHash}.json`)
+    // Doğru ad, SAĞLIKSIZ içerik (içerik hash'i ≠ ad)
+    writeFileSync(file, `${JSON.stringify({ ...legacy, bozuk: true }, null, 2)}\n`)
+    clearConfigSnapshotCache()
+
+    expect(loadConfigSnapshot(legacyHash)).toBeNull()
+    expect(resolveReplayConfig(legacyHash)).toBeNull()
+
+    const db = openDb(':memory:')
+    createSession(db, SESSION)
+    db.prepare(
+      `INSERT INTO rounds
+         (session_id, client_request_id, seed, bet, win, balance_after,
+          round_hash, config_hash, forced, created_at)
+       VALUES (?, ?, ?, 100, 0, ?, 'x', ?, NULL, ?)`,
+    ).run(
+      SESSION,
+      'bozuk-req-000001',
+      'corrupt-seed-01',
+      getBalance(db, SESSION),
+      legacyHash,
+      Date.now(),
+    )
+
+    const findings = runAudit(db)
+    expect(findings.some((f) => f.check === 'R2' && !f.ok)).toBe(true)
+  })
+
+  it('hiç snapshot yoksa → R2 "config sürümü kayıp"', () => {
+    const missingHash = createHash('sha256').update('asla-var-olmayan').digest('hex')
+    clearConfigSnapshotCache()
+    expect(resolveReplayConfig(missingHash)).toBeNull()
+
+    const db = openDb(':memory:')
+    createSession(db, SESSION)
+    db.prepare(
+      `INSERT INTO rounds
+         (session_id, client_request_id, seed, bet, win, balance_after,
+          round_hash, config_hash, forced, created_at)
+       VALUES (?, ?, ?, 100, 0, ?, 'x', ?, NULL, ?)`,
+    ).run(
+      SESSION,
+      'yok-req-000001',
+      'missing-seed-01',
+      getBalance(db, SESSION),
+      missingHash,
+      Date.now(),
+    )
+
+    const findings = runAudit(db)
+    const r2 = findings.find((f) => f.check === 'R2' && !f.ok)
+    expect(r2?.detail).toContain('kayıp')
+  })
+})

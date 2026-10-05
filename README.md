@@ -11,18 +11,20 @@ motoru** ve Next.js 16 sarmalayıcısı. Hedef: **gerçek para / lisanslı** kul
 
 ```bash
 npm run dev        # Next.js geliştirme sunucusu
-npm test           # Vitest (79 test: RNG, motor, bonus, cüzdan, property-based, denetim)
+npm test           # Vitest (87 test: RNG, motor, bonus, cüzdan, property-based, denetim, telemetri)
 npm run typecheck  # tsc --noEmit
 npm run lint       # eslint
 npm run build && npm start   # üretim derlemesi + sunucu (http://localhost:3000)
 npm run sim -- 1000000 <seed> [bet]   # RTP/volatilite simülasyonu
 npm run gate [-- spins seed]   # CI RTP kapısı (kalibre bantlar, exit 1 = kapalı)
 npm run audit [-- dbPath]      # denetçi replay aracı (R1-L3 raporu, exit 1 = bulgu)
+npm run release    # yayın zinciri: typecheck && lint && test && build && gate && audit
 ```
 
 Denetim veritabanı: `node:sqlite` (yerleşik, bağımlılık yok) → `.data/slot.db`
 (WAL; `SLOT_DB_PATH` ile değiştirilebilir; git'e girmez). Demo `force` QA kapısı
-production'da `SLOT_ALLOW_FORCE=1` ile açılır.
+production'da `SLOT_ALLOW_FORCE=1` ile açılır. Ortam değişkenleri şablonu:
+`.env.example`; yayın runbook'u: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 ## Mimari
 
@@ -44,8 +46,12 @@ src/lib/server/          # OTORİTER katman (sunucuda çalışır)
   db.ts                  # node:sqlite şeması: sessions / rounds / ledger
   wallet.ts              # BET-WIN-REFILL ledger + koşullu bakiye güncelleme
   spin-service.ts        # performSpin(): idempotency → transaction → replay doğrulama
+  config-versions.ts     # config sürümleme: snapshot üret/yükle, replay config çözümü
+  telemetry.ts           # süreç sayaçları + DB tüm-zamanlar metrik raporu
+  audit.ts / audit-cli   # denetçi motoru (R1 replay · R2 sürüm · L1-L3 ledger)
   session.ts             # HttpOnly cookie oturumu (demo kimliği; gerçek parada hesap)
-src/app/api/             # Route handlers: GET state · POST spin · POST demo/refill
+src/app/api/             # GET state · POST spin · POST demo/refill
+                         # GET health (yazmasız liveness) · GET telemetry
 src/store/game-store.ts  # Zustand: bakiye/bahis/faz — spinId artınca sahne oynatır
 src/phaser/              # İstemci render katmanı (MATEMATİK YOK)
   textures.ts            # Sembol dokuları çalışma anında pişirilir (asset dosyası yok)
@@ -97,6 +103,24 @@ Paranın tek kapısı sunucudur — istemcide matematik ve bakiye **yoktur**:
 - Kontrol haritası + üretim öncesi boşluklar:
   [`docs/CERTIFICATION.md`](docs/CERTIFICATION.md)
 
+## Config versiyonlama, telemetri ve yayın (Faz 6)
+
+- **Config sürümleme**: her binary ilk turda oyun verisinin snapshot'ını
+  `.data/config-versions/<hash>.json`'a yazar (dosya adı = içeriğin
+  sha256'sı; bütünlük yüklemede doğrulanır). Config değişince **eski
+  dosya kalır** → denetim R1/R2 artık eski sürümle replay eder;
+  snapshot yoksa **FAIL** (`config-versions.test.ts` — sahte içerik,
+  bozuk dosya, eksik sürüm senaryoları dahil).
+- **Telemetri**: `GET /api/telemetry` → `process` (bu sürecin sayaçları:
+  tur, link/FS tetikleri, reddetmeler, süreç RTP'si) + `allTime`
+  (denetim DB'sinden: rounds, forced, bet/win, RTP, son tur) +
+  `configHash`. `GET /api/health` → yazmasız liveness + canlı config
+  parmak izi (deploy doğrulaması; 503 = DB erişilemez).
+- **Yayın**: `npm run release` tek komutta tüm kapılar;
+  [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) → ortam değişkenleri,
+  süreç yönetimi, TLS/ters proxy, yedekleme (`.data/` + config
+  snapshot'ları birlikte), geri dönüş, yayın sonrası doğrulama.
+
 ## Oyun kuralları (v1)
 
 - **5 makara × 3 satır, 20 çizgi, both-ways** (LTR + RTL), para **tamsayı**
@@ -138,7 +162,7 @@ Ayrıntılar: [`docs/CALIBRATION.md`](docs/CALIBRATION.md)
 - [x] **Faz 3** — Otoriter spin endpoint'i + cüzdan (BET/WIN ledger, idempotency, replay denetimi)
 - [x] **Faz 4** — Phaser istemcisi (reel animasyonları, Link/FS bonus sahneleri, HUD)
 - [x] **Faz 5** — Property-based test + CI RTP kapısı + sertifikasyon hazırlığı
-- [ ] **Faz 6** — Telemetri, config versiyonlama, yayın
+- [x] **Faz 6** — Telemetri, config versiyonlama, yayın (`npm run release`, `docs/DEPLOYMENT.md`)
 
 ### Demo istemci notları
 

@@ -7,8 +7,8 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { auditFailed, runAudit } from './audit'
+import { CURRENT_CONFIG_HASH } from './config-versions'
 import { openDb } from './db'
-import { CURRENT_CONFIG_HASH } from './spin-service'
 
 const dbPath =
   process.argv[2] ??

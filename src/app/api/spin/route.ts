@@ -9,6 +9,7 @@ import type {
 import { getDb } from '@/lib/server/db'
 import { performSpin, type SpinFailureReason } from '@/lib/server/spin-service'
 import { getOrCreateSessionId } from '@/lib/server/session'
+import { recordReject, recordSpin } from '@/lib/server/telemetry'
 
 function fail(
   status: number,
@@ -67,6 +68,7 @@ export async function POST(
 
   const body = parseBody(raw)
   if (!body) {
+    recordReject('invalid_request')
     return fail(
       400,
       'invalid_request',
@@ -102,9 +104,16 @@ export async function POST(
         ],
       }
       const [status, error, message] = map[outcome.reason]
+      recordReject(error)
       return fail(status, error, message)
     }
 
+    recordSpin({
+      bet: body.bet,
+      win: outcome.round.totalWin,
+      hasLink: outcome.round.link !== null,
+      hasFs: outcome.round.freeSpins !== null,
+    })
     return NextResponse.json({
       round: outcome.round,
       balance: outcome.balance,
@@ -112,6 +121,7 @@ export async function POST(
     })
   } catch (err) {
     console.error('spin hatası:', err)
+    recordReject('internal_error')
     return fail(500, 'internal_error', 'Sunucu hatası — tur işlenmedi')
   }
 }
