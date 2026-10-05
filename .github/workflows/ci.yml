@@ -42,3 +42,15 @@ jobs:
       - name: Denetçi replay (varsa DB)
         if: ${{ hashFiles('.data/slot.db') != '' }}
         run: npm run audit
+
+      # Ortam postürü (Faz 7): dev ortamda bilgilendirici, kodla ölçüm
+      - name: Ortam kontrolü (doctor)
+        run: npm run doctor
+
+      # WORM mekanizması (Faz 7): hash-zincirli dışa aktar + zinciri doğrula
+      - name: Denetim dışa aktarımı + zincir doğrulama
+        if: ${{ hashFiles('.data/slot.db') != '' }}
+        run: |
+          npm run audit:export
+          f=$(ls -t .data/exports/*.jsonl | head -1)
+          npm run audit:export -- --verify "$f"

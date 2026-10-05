@@ -33,6 +33,11 @@ export type ApiErrorCode =
   | 'insufficient_balance'
   | 'request_conflict'
   | 'force_not_allowed'
+  | 'rng_unhealthy'
+  | 'limit_exceeded'
+  | 'kyc_required'
+  | 'invalid_credentials'
+  | 'username_taken'
   | 'internal_error'
 
 export interface ApiErrorBody {

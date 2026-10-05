@@ -18,6 +18,9 @@ import {
   resolveReplayConfig,
 } from './config-versions'
 import { creditIf, getBalance, getSession } from './wallet'
+import { entropyStatus } from './entropy'
+import { checkLimits, getLimits, limitUsage, type LimitId } from './limits'
+import { kycGate, type KycGateResult } from './accounts'
 
 /// ────────────────────────────────── determinizm / denetim yardımcıları
 
@@ -83,10 +86,18 @@ export type SpinFailureReason =
   | 'insufficient_balance'
   | 'request_conflict'
   | 'force_not_allowed'
+  | 'rng_unhealthy'
+  | 'limit_exceeded'
+  | 'kyc_required'
 
 export type SpinOutcome =
   | { ok: true; round: SpinRound; balance: number; roundId: number }
-  | { ok: false; reason: SpinFailureReason }
+  | {
+      ok: false
+      reason: SpinFailureReason
+      limit?: LimitId
+      kyc?: KycGateResult
+    }
 
 export interface PerformSpinOptions {
   sessionId: string
@@ -95,6 +106,9 @@ export interface PerformSpinOptions {
   force?: SpinForce | null
   /// QA kapısı: route NODE_ENV/env'den geçirir; gerçek para kapalıdır
   allowForce?: boolean
+  /// KYC politikası (route: `SLOT_REQUIRE_KYC=1`): anonim oturumlar da
+  /// doğrulanmış hesaba bağlı olmalı. Varsayılan false = anonim demo serbest.
+  requireAccount?: boolean
 }
 
 /// Bonus turlu seed araması (demo QA). Seed'ler deterministiktir:
@@ -166,7 +180,33 @@ export function performSpin(
     }
   }
 
-  // 2) Force kapısı (demo QA)
+  // 1b) KYC kapısı (Faz 7 · §7): YENİ tur üretmeden önce kimlik
+  //     doğrulanmış olmalı. İdempotent replay burayı GEÇER — bahis
+  //     zaten alınmış, sonucu sahiplenmek kimlik gerektirmez.
+  const requireAccount = opts.requireAccount ?? false
+  const kyc = kycGate(db, sessionId, requireAccount)
+  if (kyc !== 'ok') {
+    return { ok: false, reason: 'kyc_required', kyc }
+  }
+
+  // 2) RNG sağlığı (entropi kaynağı): YENİ seed üretmeden ÖNCE dur —
+  //    sağlık testi başarısızsa oyun oynatılmaz (GLI-19 tipi şart).
+  //    Mevcut turun idempotent replay'i seed üretmez → engellenmez.
+  const health = entropyStatus()
+  if (!health.ok) {
+    return { ok: false, reason: 'rng_unhealthy' }
+  }
+
+  // 2a) Sorumlu oyun limitleri: YENİ tur kabul edilmeden önce (kayıp/
+  //     ciro/süre). İhlal → hiçbir yazılmaz, para hareketi olmaz.
+  //     Limitler NULL ise (demo varsayılanı) bu kontrol hemen geçer.
+  const usage = limitUsage(db, sessionId)
+  const violated = checkLimits(getLimits(db, sessionId), usage, bet)
+  if (violated) {
+    return { ok: false, reason: 'limit_exceeded', limit: violated }
+  }
+
+  // 2b) Force kapısı (demo QA)
   let seed: string
   if (force) {
     if (!allowForce) return { ok: false, reason: 'force_not_allowed' }

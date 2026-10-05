@@ -11,14 +11,16 @@ motoru** ve Next.js 16 sarmalayıcısı. Hedef: **gerçek para / lisanslı** kul
 
 ```bash
 npm run dev        # Next.js geliştirme sunucusu
-npm test           # Vitest (87 test: RNG, motor, bonus, cüzdan, property-based, denetim, telemetri)
+npm test           # Vitest (120 test: RNG, motor, bonus, cüzdan, property, denetim, telemetri, limit, KYC)
 npm run typecheck  # tsc --noEmit
 npm run lint       # eslint
 npm run build && npm start   # üretim derlemesi + sunucu (http://localhost:3000)
 npm run sim -- 1000000 <seed> [bet]   # RTP/volatilite simülasyonu
 npm run gate [-- spins seed]   # CI RTP kapısı (kalibre bantlar, exit 1 = kapalı)
 npm run audit [-- dbPath]      # denetçi replay aracı (R1-L3 raporu, exit 1 = bulgu)
-npm run release    # yayın zinciri: typecheck && lint && test && build && gate && audit
+npm run doctor [-- --strict]   # yayın ortamı postürü (force/cookie/DB/entropi; strict = deploy kapısı)
+npm run audit:export [-- --verify <file>] [-- --ship]  # hash-zincirli uzak denetim kopyası
+npm run release    # yayın zinciri: typecheck && lint && test && build && gate && audit && doctor
 ```
 
 Denetim veritabanı: `node:sqlite` (yerleşik, bağımlılık yok) → `.data/slot.db`
@@ -43,15 +45,20 @@ src/lib/engine/          # SAF MOTOR (framework'süz, sunucu+istemci ortak)
 src/lib/api-types.ts     # İstemci↔sunucu sözleşmesi (ALLOWED_BETS, SpinRequest/Response)
 src/lib/api-client.ts    # İstemci veri kaynağı: /api/state, /api/spin, /api/demo/refill
 src/lib/server/          # OTORİTER katman (sunucuda çalışır)
-  db.ts                  # node:sqlite şeması: sessions / rounds / ledger
+  db.ts                  # node:sqlite şeması: sessions / rounds / ledger / players (+migrasyon)
   wallet.ts              # BET-WIN-REFILL ledger + koşullu bakiye güncelleme
-  spin-service.ts        # performSpin(): idempotency → transaction → replay doğrulama
+  spin-service.ts        # performSpin(): idempotency → KYC → RNG → limitler → transaction
   config-versions.ts     # config sürümleme: snapshot üret/yükle, replay config çözümü
+  entropy.ts             # RNG sağlık testi (zayıf kaynak → oyun durur)
+  limits.ts              # sorumlu oyun: kayıp/ciro/süre limitleri (sunucuda zorlu)
+  accounts.ts            # hesap/KYC: scrypt parola, kyc_status, oturum-oyuncu bağı
   telemetry.ts           # süreç sayaçları + DB tüm-zamanlar metrik raporu
-  audit.ts / audit-cli   # denetçi motoru (R1 replay · R2 sürüm · L1-L3 ledger)
-  session.ts             # HttpOnly cookie oturumu (demo kimliği; gerçek parada hesap)
+  doctor.ts / audit.ts   # ortam postürü + denetçi motoru (R1-R2, L1-L3)
+  audit-export.ts        # hash-zincirli denetim dışa aktarımı + uzak kopya (--ship)
+  session.ts             # HttpOnly cookie oturumu (altına oyuncu bağı — Faz 7)
 src/app/api/             # GET state · POST spin · POST demo/refill
-                         # GET health (yazmasız liveness) · GET telemetry
+                         # GET health (liveness+entropi) · GET telemetry · GET/PUT limits
+                         # POST auth/register · auth/login · auth/logout · auth/kyc
 src/store/game-store.ts  # Zustand: bakiye/bahis/faz — spinId artınca sahne oynatır
 src/phaser/              # İstemci render katmanı (MATEMATİK YOK)
   textures.ts            # Sembol dokuları çalışma anında pişirilir (asset dosyası yok)
@@ -121,6 +128,24 @@ Paranın tek kapısı sunucudur — istemcide matematik ve bakiye **yoktur**:
   süreç yönetimi, TLS/ters proxy, yedekleme (`.data/` + config
   snapshot'ları birlikte), geri dönüş, yayın sonrası doğrulama.
 
+## Üretim sertifikasyon boşlukları (Faz 7 — CERTIFICATION §7)
+
+- **Entropi**: `randomSeed()` yalnızca CSPRNG (yoksa **hata** — `Math.random`
+  fallback kaldırıldı); startup sağlık testi (sıfır/sabit/tekrar/monobit)
+  başarısızsa `performSpin` tur üretmez (`503 rng_unhealthy`) ve `/api/health`
+  raporlar.
+- **`npm run doctor`**: yayın ortamı postürü kodla ölçülür — NODE_ENV,
+  QA force kapısı production'da **açıksa fail**, cookie `Secure`, DB
+  `quick_check`, snapshot yazılabilirlik, entropi. `--strict` → deploy kapısı.
+- **Sorumlu oyun**: kayıp/ciro/süre limitleri sunucuda zorlu
+  (`403 limit_exceeded`, ihlalde iz yok); `GET/PUT /api/limits`.
+- **WORM uzak kopya**: `npm run audit:export` → hash-zincirli JSONL
+  (ekleme/silme/değiştirme zinciri kırar, header sayımı onarılmış eklemeyi
+  de tutmaz); `--verify` + `--ship` (`SLOT_AUDIT_SINK`).
+- **Hesap/KYC**: `players` + scrypt parola + register/login/logout,
+  `kyc_status` kapısı — `pending`/`rejected` tur oynayamaz; anonim oyun
+  `SLOT_REQUIRE_KYC=1` ile tamamen kapanır. Detay: `docs/DEPLOYMENT.md §10`.
+
 ## Oyun kuralları (v1)
 
 - **5 makara × 3 satır, 20 çizgi, both-ways** (LTR + RTL), para **tamsayı**
@@ -163,6 +188,7 @@ Ayrıntılar: [`docs/CALIBRATION.md`](docs/CALIBRATION.md)
 - [x] **Faz 4** — Phaser istemcisi (reel animasyonları, Link/FS bonus sahneleri, HUD)
 - [x] **Faz 5** — Property-based test + CI RTP kapısı + sertifikasyon hazırlığı
 - [x] **Faz 6** — Telemetri, config versiyonlama, yayın (`npm run release`, `docs/DEPLOYMENT.md`)
+- [x] **Faz 7** — CERTIFICATION §7 boşlukları: entropi sağlığı, `doctor`, sorumlu oyun limitleri, WORM export, hesap/KYC
 
 ### Demo istemci notları
 

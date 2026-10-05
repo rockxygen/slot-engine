@@ -76,4 +76,17 @@ describe('randomSeed', () => {
     expect(seeds.size).toBe(100)
     for (const s of seeds) expect(s).toMatch(/^[0-9a-f]{32}$/)
   })
+
+  it('CSPRNG yoksa hata fırlatır — zayıf kaynağa (Math.random) sessiz düşüş YOK', () => {
+    const holder = globalThis.crypto as unknown as { getRandomValues?: unknown }
+    const original = holder.getRandomValues
+    holder.getRandomValues = undefined
+    try {
+      expect(() => randomSeed()).toThrow(/CSPRNG/)
+    } finally {
+      holder.getRandomValues = original
+    }
+    // kaynak geri geldi → üretim devam
+    expect(randomSeed()).toMatch(/^[0-9a-f]{32}$/)
+  })
 })

@@ -38,9 +38,38 @@ CREATE TABLE IF NOT EXISTS ledger (
   created_at     INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS players (
+  id            TEXT PRIMARY KEY,
+  username      TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  kyc_status    TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (kyc_status IN ('pending', 'verified', 'rejected')),
+  created_at    INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_ledger_session ON ledger(session_id, id);
 PRAGMA user_version = 1;
 `
+
+/// Sürüm migrasyonu: sonraki fazların sütunları mevcut DB'lere eklenir.
+/// Sütun-varlık kontrolü idempotent — eski/yeni DB aynı şemaya oturur.
+function ensureColumns(db: DatabaseSync): void {
+  const cols = new Set(
+    (
+      db.prepare('PRAGMA table_info(sessions)').all() as { name: string }[]
+    ).map((c) => c.name),
+  )
+  // Faz 7b: sorumlu oyun limitleri (NULL = limit yok)
+  if (!cols.has('loss_limit'))
+    db.exec('ALTER TABLE sessions ADD COLUMN loss_limit INTEGER')
+  if (!cols.has('spend_limit'))
+    db.exec('ALTER TABLE sessions ADD COLUMN spend_limit INTEGER')
+  if (!cols.has('session_limit_sec'))
+    db.exec('ALTER TABLE sessions ADD COLUMN session_limit_sec INTEGER')
+  // Faz 7e: oturum → oyuncu bağı (NULL = anonim demo oturumu)
+  if (!cols.has('player_id'))
+    db.exec('ALTER TABLE sessions ADD COLUMN player_id TEXT')
+}
 
 /// Testler ve üretim AYNI kodu kullanır: `:memory:` veya dosya.
 export function openDb(path: string): DatabaseSync {
@@ -52,6 +81,7 @@ export function openDb(path: string): DatabaseSync {
   db.exec('PRAGMA foreign_keys = ON;')
   db.exec('PRAGMA busy_timeout = 5000;')
   db.exec(SCHEMA)
+  ensureColumns(db)
   return db
 }
 

@@ -9,15 +9,19 @@ Her yayın dalı (`master`) şu zincirden geçmeden deploy edilmez:
 
 ```bash
 npm run release
-# = typecheck && lint && test && build && gate && audit
+# = typecheck && lint && test && build && gate && audit && doctor
 ```
 
 | Kapı | Ne korur |
 | --- | --- |
-| `typecheck` / `lint` / `test` | sözleşme, mantık, property + telemetri + config-sürüm testleri (87+) |
+| `typecheck` / `lint` / `test` | sözleşme, mantık, property + telemetri + config-sürüm + entropi + limit + KYC testleri (120+) |
 | `build` | üretim derlemesi |
 | `gate` | **RTP regresyon kapısı** — 2M deterministik spin, bantlar (CI'da `exit 1` kanıtlanmış) |
 | `audit` | canlı `.data/slot.db` üzerinde R1–L3 denetimi (replay + config sürümü + ledger) |
+| `doctor` | ortam postürü: NODE_ENV, force kapısı, cookie Secure, DB, entropi (Faz 7) |
+
+Production sunucusunda **strict** mod: `npm run doctor -- --strict`
+(deploy kapısı — uyarı da `exit 1`; `.env.example`'daki değişkenlerle).
 
 CI (`.github/workflows/ci.yml`) aynı zinciri koşar; kapıların kapandığı da
 negatif testlerle kanıtlanmıştır.
@@ -31,6 +35,8 @@ Kopyalanabilir şablon: `.env.example`
 | `SLOT_DB_PATH` | `.data/slot.db` | Denetim DB'si. **Mutlaka sabit, yedeklenen bir yolu olsun.** WAL açık. |
 | `SLOT_CONFIG_VERSIONS_DIR` | `.data/config-versions` | Config sürüm snapshot'ları (aşağıya bkz.). **Silinmez; sadece eklenir.** |
 | `SLOT_ALLOW_FORCE` | kapalı | `?force=` QA kapısı. `NODE_ENV=production`'da yalnızca `1` ile açılır — **lisanslı yayında asla `1` yapılmaz.** |
+| `SLOT_REQUIRE_KYC` | kapalı | `1` → anonim oyun kapalı; yalnızca `kyc_status=verified` oyuncu oynar. **Lisanslı yayında `1` olmalı.** |
+| `SLOT_AUDIT_SINK` | — | Uzak denetim kopyası uç noktası (`audit:export --ship`). |
 | `NODE_ENV` | `production` | `npm start` zorlar; cookie `Secure` bundan doğar. |
 
 ## 3. Yayın adımları
@@ -135,7 +141,51 @@ Operatör bakışı: `allTime.rtp` uzun vadede `docs/CALIBRATION.md`
 bantlarını (gate bantları) izlemelidir; sapma kalibrasyon incelemesi
 (bkz. `docs/CALIBRATION.md` değişiklik kontrolü) demektir.
 
-## 9. Bilinen boşluklar
+## 9. Uzak denetim kopyası (WORM akışı — Faz 7)
+
+Yerel SQLite tek başına değiştirilebilir → denetim kanıtının **ikinci
+kopyası** hash-zincirli JSONL olarak üretilir:
+
+```bash
+npm run audit:export                       # .data/exports/audit-<ts>.jsonl
+npm run audit:export -- --verify <file>    # zinciri yeniden hesaplar; bozuksa exit 1
+SLOT_AUDIT_SINK=https://… npm run audit:export -- --ship   # uzak uç noktaya POST
+```
+
+- Zincir: her satır `sha256(önceki + kayıt)` → satır silme/ekleme/
+  değiştirme **kırar**; header'daki sayım ↔ kayıt sayısı ayrıca tutar
+  (onarılmış ekleme bile yakalanır — test edilmiş).
+- **Zamanlama**: Zamanlayıcı/cron ile örn. 5 dakikada bir `--ship`
+  (Windows: Task Scheduler; Linux: cron/systemd timer). Uzak uç nokta
+  `2xx` dışında yanıt verirse komut `exit 1` → görev geçmişi alarm üretir.
+- Haftalık en az bir: her iki kopyayı `--verify` + `npm run audit`
+  ile karşılaştırın (yerel DB ↔ uzak kopya tutarlı mı).
+
+## 10. Sorumlu oyun ve KYC operasyonu (Faz 7)
+
+**Limitler** (`GET/PUT /api/limits`): `lossLimit` (net kayıp), `spendLimit`
+(ciro), `sessionLimitSec` (açılıştan süre) — `performSpin` öncesi sunucuda
+zorlanır; `null` = sınırsız. Demo varsayılanı sınırsızdır; **lisanslı
+yayında hesap açılışında zorunlu varsayılanlar** konur (ürün kararı) ve
+HUD'da gösterilir.
+
+**KYC politikası**: `SLOT_REQUIRE_KYC=1` → yalnızca `kyc_status=verified`
+oyuncu tur oynayabilir (anonim demo kapalı). Akış:
+`POST /api/auth/register|login` → oturum oyuncuya bağlanır →
+`kyc_status=pending` iken tur **403 `kyc_required`** → sağlayıcı onayı
+(`setKycStatus` / demo stub `POST /api/auth/kyc`) → oyun açılır.
+
+```bash
+curl -c jar -X POST localhost:3000/api/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"ayse","password":"guclu-parola-1"}'   # 201, kyc:pending
+curl -b jar -X POST localhost:3000/api/spin …            # 403 kyc_required
+curl -b jar -X POST localhost:3000/api/auth/kyc \
+  -H 'Content-Type: application/json' -d '{"status":"verified"}'
+curl -b jar -X POST localhost:3000/api/spin …            # 200 (oyun açık)
+```
+
+## 11. Bilinen boşluklar
 
 Lisanslı/gerçek para öncesi kalanlar: `docs/CERTIFICATION.md` §7
 (entropi kaynağı, hesap/KYC, WORM uzak kopya, sorumlu oyun limitleri).

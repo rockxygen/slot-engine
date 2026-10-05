@@ -13,7 +13,9 @@
     "sim": "tsx src/lib/engine/sim-cli.ts",
     "gate": "tsx src/lib/engine/rtp-gate-cli.ts",
     "audit": "tsx src/lib/server/audit-cli.ts",
-    "release": "npm run typecheck && npm run lint && npm test && npm run build && npm run gate && npm run audit"
+    "doctor": "tsx src/lib/server/doctor-cli.ts",
+    "audit:export": "tsx src/lib/server/audit-export-cli.ts",
+    "release": "npm run typecheck && npm run lint && npm test && npm run build && npm run gate && npm run audit && npm run doctor"
   },
   "dependencies": {
     "next": "16.3.8",

@@ -7,6 +7,7 @@ import type {
   SpinResponse,
 } from '@/lib/api-types'
 import { getDb } from '@/lib/server/db'
+import { LIMIT_LABELS } from '@/lib/server/limits'
 import { performSpin, type SpinFailureReason } from '@/lib/server/spin-service'
 import { getOrCreateSessionId } from '@/lib/server/session'
 import { recordReject, recordSpin } from '@/lib/server/telemetry'
@@ -86,6 +87,7 @@ export async function POST(
       allowForce:
         process.env.NODE_ENV !== 'production' ||
         process.env.SLOT_ALLOW_FORCE === '1',
+      requireAccount: process.env.SLOT_REQUIRE_KYC === '1',
     })
 
     if (!outcome.ok) {
@@ -102,8 +104,32 @@ export async function POST(
           'force_not_allowed',
           'Demo force modu bu ortamda kapalı',
         ],
+        rng_unhealthy: [
+          503,
+          'rng_unhealthy',
+          'RNG sağlık testi başarısız — tur üretilmedi',
+        ],
+        limit_exceeded: [
+          403,
+          'limit_exceeded',
+          'Sorumlu oyun limiti aşıldı — tur üretilmedi',
+        ],
+        kyc_required: [
+          403,
+          'kyc_required',
+          'Hesap/KYC doğrulaması gerekli — tur üretilmedi',
+        ],
       }
-      const [status, error, message] = map[outcome.reason]
+      const [status, error, baseMessage] = map[outcome.reason]
+      let message = baseMessage
+      if (outcome.reason === 'limit_exceeded' && outcome.limit) {
+        message = `${LIMIT_LABELS[outcome.limit]}: aşıldı — devam için limiti yükseltin`
+      } else if (outcome.reason === 'kyc_required') {
+        message =
+          outcome.kyc === 'account_required'
+            ? 'Bu ortamda oynamak için hesap gerekli — giriş yapın'
+            : 'KYC doğrulamanız tamamlanmadı — belgeler onaylanana kadar tur oynanamaz'
+      }
       recordReject(error)
       return fail(status, error, message)
     }

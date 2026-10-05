@@ -87,13 +87,17 @@ export function createRng(seed: string, state?: RngState): Rng {
   }
 }
 
-/// Sunucu/istemci için rastgele seed (denetimde hash'lenip saklanır)
+/// Sunucu/istemci için rastgele seed (denetimde hash'lenip saklanır).
+/// YALNIZCA CSPRNG: `getRandomValues` yoksa bilerek hata fırlatır —
+/// zayıf bir kaynağa (Math.random) sessiz düşüş lisanslı üründe
+/// denetim ihlalidir (GLI-19 RNG kaynağı şartı).
 export function randomSeed(): string {
   const bytes = new Uint8Array(16)
-  if (typeof globalThis.crypto?.getRandomValues === 'function') {
-    globalThis.crypto.getRandomValues(bytes)
-  } else {
-    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256)
+  if (typeof globalThis.crypto?.getRandomValues !== 'function') {
+    throw new Error(
+      'randomSeed: CSPRNG (crypto.getRandomValues) yok — seed üretilemedi',
+    )
   }
+  globalThis.crypto.getRandomValues(bytes)
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
 }

@@ -15,7 +15,7 @@
 | Durum kaydetme / geri yükleme | `rng.state()` → `createRng(seed, state)` **atlamadan** devam → replay'in temeli | property: *"kayıtlı durumdan devam = orijinal zincirin devamı"* |
 | Seed genişletme | xmur3 (avalanche hash), isınma turu (16 adım) | `rng.ts` |
 | Tur determinizmi | aynı `(seed, bet)` → JSON olarak birebir aynı `SpinRound` | property: *"aynı (seed, bet) → birebir aynı tur"* (200 örnek/tur) |
-| Üretim entropisi (BOŞLUK §7) | Sunucu seed'i `crypto.getRandomValues` (CSPRNG); laboratuvar onaylı DRBG/kaynak **üretim öncesi** bağlanacak | `rng.ts randomSeed()` |
+| Üretim entropisi | Sunucu seed'i **yalnızca** CSPRNG (`crypto.getRandomValues`); kaynağı yoksa seed üretmez → hata. Startup sağlık testi (sıfır/sabit/tekrar/monobit) başarısızsa oyun **oynatmaz** | `rng.ts randomSeed()` + `server/entropy.ts` (+ testleri). **Dış:** laboratuvar onaylı DRBG (§7) |
 
 ## 2. Tur üretimi ve replay denetimi
 
@@ -71,28 +71,58 @@
 | Tip/lint/build | `npm run typecheck && npm run lint && npm run build` | sözleşme bütünlüğü |
 | **RTP regresyon kapısı** | `npm run gate` | 2M spin (seed `rtp-gate-1`, deterministik): RTP **%95.40–96.60**, base/link/FS katkı bantları, hit %45–49, tetik frekansları, max win ≤1300×, σ bantları, bileşen toplamı ≡ RTP |
 | Denetçi replay | `npm run audit` | gerçek DB üzerinde R1–L3 (config sürümü snapshot üzerinden, Faz 6) |
-| **Yayın zinciri** | `npm run release` | typecheck→lint→test→build→gate→audit tek komut; biri başarısızsa deploy durur (`docs/DEPLOYMENT.md`) |
+| **Yayın zinciri** | `npm run release` | typecheck→lint→test→build→gate→audit→doctor tek komut; biri başarısızsa deploy durur (`docs/DEPLOYMENT.md`) |
+| **Ortam postürü** | `npm run doctor [-- --strict]` | NODE_ENV, force kapısı, cookie `Secure`, DB quick_check, snapshot yazılabilirlik, entropi sağlığı (Faz 7) |
+| **Uzak kopya zinciri** | `npm run audit:export [-- --verify/--ship]` | hash-zincirli denetim dışa aktarımı; bozulma/sayım uyuşmazlığı `exit 1` (Faz 7) |
 
 - Kapının kapandığı da **kanıtlanmıştır**: yetersiz spin sayısı/beklenmeyen
   seed bant dışına çıkar → `exit 1` (negatif test koşuldu).
 - Referans kalibrasyon: 20M spin → **%95.93** (`docs/CALIBRATION.md`).
 
-## 7. Üretim öncesi bilinen boşluklar (Faz 6 + operasyon)
+## 7. Üretim öncesi bilinen boşluklar (Faz 6–7 + operasyon)
 
-- [ ] **Entropi kaynağı**: laboratuvar onaylı RNG/DRBG kaynağı (şu an
-      `crypto.getRandomValues` — CSPRNG, çoğu yargı için yeterli başlangıç,
-      nihai karar laboratuvarındır).
-- [ ] Hesap/KYC kimliği yerine cookie demo kimliği; gerçek oturum yönetimi.
-- [ ] TLS zorunlu, `Secure` cookie (prod'da `NODE_ENV=production` ile zaten
-      `Secure`; tam ortam doğrulaması yayın öncesi).
-- [ ] Denetim loglarının WORM/uzak kopyaya akışı (yerel SQLite → prod'da
-      append-only depolama/uzak kopya).
-- [ ] Limitler ve sorumlu oyun kontrolleri (kayıp limiti, oturum süresi).
+> İşaret = **kod tarafı tamam ve test edildi**. Yanında "dış" yazan kısım
+> altyapı/laboratuvar/sağlayıcı işidir — bu depoda yapılmaz ama mekanizma
+> hazır ve koddan doğrulanır. Kapıların çoğu: `npm run doctor` (ortam) ve
+> `npm run release` (tüm zincir).
+
+- [x] **Entropi kaynağı (Faz 7 — kod TAMAM)**: `randomSeed()` yalnızca
+      CSPRNG — `getRandomValues` yoksa **hata fırlatır** (zayıf kaynağa
+      sessiz düşüş yok, `rng.test.ts`). Startup sağlık testi
+      (`entropy.ts`: sıfır/sabit/tekrar/monobit — zayıf kaynak senaryoları
+      testte yakalanır); başarısızsa `performSpin` yeni tur üretmez
+      (`503 rng_unhealthy`), `/api/health` raporlar. **Dış kalan:**
+      laboratuvar onaylı DRBG kararı.
+- [x] **Hesap/KYC (Faz 7 — mekanizma TAMAM)**: `players` tablosu +
+      scrypt parola (`accounts.ts`, timingSafeEqual), register/login/logout
+      uçları, oturum→oyuncu bağı, `kyc_status` **kapısı** — `pending`/
+      `rejected` oyuncu tur oynayamaz (`403 kyc_required`, iz bırakmaz);
+      `SLOT_REQUIRE_KYC=1` ile anonim oyun tamamen kapanır (lisanslı
+      yayında bu açık olmalı). KYC onayının kendisi sağlayıcı webhook'u
+      → `setKycStatus` ile girer (`POST /api/auth/kyc` demo stub'ı).
+      **Dış kalan:** KYC sağlayıcısı + giriş UI'ı.
+- [x] **TLS / Secure cookie (Faz 7 — ölçüm TAMAM)**: `npm run doctor`
+      üretim postürünü **kodla ölçer** (NODE_ENV, force kapısı kapalı mı,
+      cookie `Secure` aktif mi, DB quick_check, snapshot yazılabilirlik,
+      entropi); `--strict` deploy kapısı → `exit 1`. **Dış kalan:** TLS
+      sonlandırması (ters proxy, `docs/DEPLOYMENT.md §5`).
+- [x] **WORM / uzak kopya (Faz 7 — mekanizma TAMAM)**: `npm run
+      audit:export` → hash-zincirli JSONL (satır ekleme/silme/değiştirme
+      zinciri kırar; header sayımı otomatik ekleme de tutmaz), `--verify`
+      zinciri yeniden hesaplar, `--ship` + `SLOT_AUDIT_SINK` ile uzak
+      uç noktaya akar (gerçek HTTP testi var). **Dış kalan:** zamanlanmış
+      kopya (cron/Zamanlayıcı) + imzalama/uzak depo.
+- [x] **Sorumlu oyun limitleri (Faz 7 — zorlama TAMAM)**: kayıp / ciro /
+      oturum süresi limitleri **sunucuda** `performSpin` öncesi zorlanır
+      (`403 limit_exceeded`, hangi limit olduğu mesajda; ihlalde iz yok),
+      `GET/PUT /api/limits` ile görüntüleme/ayar. **Kalan:** HUD'da
+      gösterim ve hesap açılışında zorunlu limit varsayılanları (ürün
+      kararı).
 - [x] **Config sürümleme (Faz 6 — TAMAM)**: eski config snapshot'ları
       saklanır, R2 sürüm üzerinden replay eder; `config-versions.ts` +
       `config-versions.test.ts` + `docs/DEPLOYMENT.md §7` (snapshot'lar
       silinmez; yedekleme `.data/` ile birliktedir).
 - [x] **Telemetri (Faz 6 — yerel TAMAM)**: `GET /api/telemetry`
       (süreç sayaçları + DB tüm-zamanlar + `configHash`),
-      `GET /api/health` (yazmasız liveness). Uzak metrik shipper
-      (Prometheus/loki) ortam eklentisi — bkz. `docs/DEPLOYMENT.md`.
+      `GET /api/health` (yazmasız liveness + entropi durumu). Uzak metrik
+      shipper (Prometheus/loki) ortam eklentisi — bkz. `docs/DEPLOYMENT.md`.
