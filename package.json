@@ -15,6 +15,7 @@
     "audit": "tsx src/lib/server/audit-cli.ts",
     "doctor": "tsx src/lib/server/doctor-cli.ts",
     "audit:export": "tsx src/lib/server/audit-export-cli.ts",
+    "audio:gen": "tsx scripts/gen-audio.ts",
     "release": "npm run typecheck && npm run lint && npm test && npm run build && npm run gate && npm run audit && npm run doctor"
   },
   "dependencies": {

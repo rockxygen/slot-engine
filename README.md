@@ -11,10 +11,11 @@ motoru** ve Next.js 16 sarmalayıcısı. Hedef: **gerçek para / lisanslı** kul
 
 ```bash
 npm run dev        # Next.js geliştirme sunucusu
-npm test           # Vitest (137 test: RNG, motor, bonus, cüzdan, property, denetim, telemetri, limit, KYC, UI)
+npm test           # Vitest (149 test: RNG, motor, bonus, cüzdan, property, denetim, telemetri, limit, KYC, ses, UI)
 npm run typecheck  # tsc --noEmit
 npm run lint       # eslint
 npm run build && npm start   # üretim derlemesi + sunucu (http://localhost:3000)
+npm run audio:gen  # ses WAV'larını sentezler → public/audio (deterministik, commit'li)
 npm run sim -- 1000000 <seed> [bet]   # RTP/volatilite simülasyonu
 npm run gate [-- spins seed]   # CI RTP kapısı (kalibre bantlar, exit 1 = kapalı)
 npm run audit [-- dbPath]      # denetçi replay aracı (R1-L3 raporu, exit 1 = bulgu)
@@ -44,6 +45,8 @@ src/lib/engine/          # SAF MOTOR (framework'süz, sunucu+istemci ortak)
 
 src/lib/api-types.ts     # İstemci↔sunucu sözleşmesi (ALLOWED_BETS, SpinRequest/Response)
 src/lib/api-client.ts    # İstemci veri kaynağı: /api/state, /api/spin, /api/demo/refill
+src/lib/audio/synth.ts   # Prosedürel ses sentezi: 8 ses, saf matematik → WAV (+test)
+scripts/gen-audio.ts     # `npm run audio:gen` → public/audio/*.wav (commit'li varlık)
 src/lib/server/          # OTORİTER katman (sunucuda çalışır)
   db.ts                  # node:sqlite şeması: sessions / rounds / ledger / players (+migrasyon)
   wallet.ts              # BET-WIN-REFILL ledger + koşullu bakiye güncelleme
@@ -61,10 +64,11 @@ src/app/api/             # GET state · POST spin · POST demo/refill
                          # POST auth/register · auth/login · auth/logout · auth/kyc
 src/store/game-store.ts  # Zustand: bakiye/bahis/faz — spinId artınca sahne oynatır
 src/phaser/              # İstemci render katmanı (MATEMATİK YOK)
-  textures.ts            # Sembol dokuları çalışma anında pişirilir (asset dosyası yok)
-  scenes/GameScene.ts    # base → link → freeSpins oynatma + highlight animasyonları
+  textures.ts            # Dokular anında pişirilir: bg gradient+vignette, kartlar,
+                         # spark partikülü, kazanç çerçevesi (asset dosyası yok)
+  scenes/GameScene.ts    # base → link → freeSpins oynatma + highlight + ses kancaları
   createGame.ts          # Phaser.Game fabrikası (SSR'da asla yüklenmez)
-src/components/slot/     # React HUD (bakiye, bahis, ÇEVİR) + canvas mount
+src/components/slot/     # React HUD (bakiye, bahis, ÇEVİR, AUTO, ses) + canvas mount
 ```
 
 ## Otoriter spin ve cüzdan (Faz 3)
@@ -149,6 +153,31 @@ Paranın tek kapısı sunucudur — istemcide matematik ve bakiye **yoktur**:
   (net/ciro/süre kullanımı + ₺/dk formu) panelleri; `kyc_required` /
   `limit_exceeded` engelinde ilgili panel otomatik açılır.
 
+## Ses, otomatik dönüş ve görsel iyileştirme (Faz 8)
+
+- **Prosedürel ses** (`src/lib/audio/synth.ts`): spin whoosh, makara duruşu,
+  scatter, **zil**, kazanç, büyük kazanç fanfarı, link bonus, jackpot — 8 ses
+  **saf matematikle** üretilir (FM çan, sweep'li gürültü, akor/arpaj);
+  deterministiktir, birim testiyle doğrulanır (`wavBytes` 16-bit PCM).
+  `npm run audio:gen` → `public/audio/*.wav` (commit'li); Phaser `preload`
+  ile yükler, dosya yoksa sessiz geçer. Lisanslı üründe asset lisansı ayrı
+  bir denetim konusudur — sentez kodu denetlenebilir kalır.
+- **Ses kancaları** (`GameScene`): çevrim, makara tıkları (ritmik `rate`
+  varyasyonu + duruş sekmesi), scatter ipucu (1-2 yumuşak / 3+ parlak),
+  **zil kazançta**, 5× bahis üstü → `bigwin` fanfarı + ekran parıltısı,
+  link/jackpot bonus fanfarları. TopBar 🔊/🔇 → `sound.mute`, tercih
+  localStorage'da (hydration sonrası okunur).
+- **Otomatik dönüş**: `AUTO ▶ ×10/25/50` (ön ayar döngüsü) — tur `settle`
+  olunca 650 ms sonra sıradaki; **hata (limit/KYC/402), bakiye yetersiz,
+  sayaç 0 veya elle durdurma** → temiz kapanış; çalışırken bahis değişmez.
+  Oyunun kendisi sunucuda: client yalnızca `spin()` çağırır — auto-spin bu
+  demo için istemcide tetiklenir, gerçek üründe tur tetikleme sunucu
+  oturumuna taşınır.
+- **Görseller**: tam ekran gradient + vignette + yıldız tozu (kırpma bantları
+  aynı dokudan → kesintisiz), çift altın çerçeve + köşe elmasları, makara
+  paneli/ayırıcıları, gloss'lu + accent kenarlı kartlar, kazançta altın
+  çerçeve parıltısı + parıltı patlaması, banner pop, başlık nabzı.
+
 ## Oyun kuralları (v1)
 
 - **5 makara × 3 satır, 20 çizgi, both-ways** (LTR + RTL), para **tamsayı**
@@ -192,6 +221,7 @@ Ayrıntılar: [`docs/CALIBRATION.md`](docs/CALIBRATION.md)
 - [x] **Faz 5** — Property-based test + CI RTP kapısı + sertifikasyon hazırlığı
 - [x] **Faz 6** — Telemetri, config versiyonlama, yayın (`npm run release`, `docs/DEPLOYMENT.md`)
 - [x] **Faz 7** — CERTIFICATION §7 boşlukları: entropi sağlığı, `doctor`, sorumlu oyun limitleri, WORM export, hesap/KYC
+- [x] **Faz 8** — Prosedürel ses (8 WAV), otomatik dönüş (10/25/50), görsel iyileştirme (bg/kart/kazanç parıltısı)
 
 ### Demo istemci notları
 

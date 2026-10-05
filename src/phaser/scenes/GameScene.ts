@@ -1,4 +1,5 @@
 import Phaser from 'phaser'
+import { SOUND_NAMES, type SoundName } from '@/lib/audio/synth'
 import {
   CLOVER_LINK_BELLS,
   createRng,
@@ -10,9 +11,8 @@ import {
   type SpinRound,
   type SymbolId,
 } from '@/lib/engine'
-import { formatMinor, useGameStore } from '@/store/game-store'
+import { formatMinor, loadSoundPref, useGameStore } from '@/store/game-store'
 import {
-  BG,
   CANVAS_H,
   CANVAS_W,
   CELL_H,
@@ -43,9 +43,11 @@ export class GameScene extends Phaser.Scene {
   private cells: CellImage[][] = []
   private cellSymbols: SymbolId[][] = []
   private winText!: Phaser.GameObjects.Text
+  private winGlow!: Phaser.GameObjects.Image
   private banner!: Phaser.GameObjects.Text
   private linkOverlay: Phaser.GameObjects.GameObject[] = []
   private highlightTweens: Phaser.Tweens.Tween[] = []
+  private highlightGlows: Phaser.GameObjects.Image[] = []
   private playing = false
   private lastSpinId = 0
   private unsub?: () => void
@@ -54,8 +56,17 @@ export class GameScene extends Phaser.Scene {
     super('game')
   }
 
+  private preload(): void {
+    // Sentezlenmiş WAV'lar (`npm run audio:gen`) — dosya yoksa sessiz atlanır
+    for (const name of SOUND_NAMES) this.load.audio(name, `audio/${name}.wav`)
+  }
+
   create(): void {
     buildTextures(this)
+
+    // Ses tercihi localStorage'dan okunur (SSR SONRASI → hydration uyumlu)
+    useGameStore.setState({ soundOn: loadSoundPref() })
+    this.sound.mute = !useGameStore.getState().soundOn
 
     for (let r = 0; r < COLS; r++) {
       this.cells[r] = new Array<CellImage>(ROWS).fill(null)
@@ -70,6 +81,7 @@ export class GameScene extends Phaser.Scene {
 
     // Her spinId artışında turu oynat
     this.unsub = useGameStore.subscribe((state, prev) => {
+      if (state.soundOn !== prev.soundOn) this.sound.mute = !state.soundOn
       if (state.spinId !== prev.spinId && state.round) {
         void this.play(state.round)
       }
@@ -80,9 +92,29 @@ export class GameScene extends Phaser.Scene {
     })
   }
 
+  // ────────────────────────────────────────────── ses
+
+  /// Güvenli çalma: dosya yüklenmediyse (asset eksikse) sessiz geç.
+  private sfx(name: SoundName, cfg?: Phaser.Types.Sound.SoundConfig): void {
+    if (!this.cache.audio.exists(name)) return
+    this.sound.play(name, cfg)
+  }
+
   // ────────────────────────────────────────────── kurulum
 
   private drawStatic(): void {
+    // Arka plan: gradient + ortam ışıması + vignette (tek doku, `textures.ts`)
+    this.add.image(0, 0, 'bg').setOrigin(0).setDepth(-10)
+
+    // Makara paneli: koyu plaka + çift altın halka (grid'in arkasında)
+    const panel = this.add.graphics().setDepth(-6)
+    panel.fillStyle(0x05080f, 0.75)
+    panel.fillRoundedRect(GRID_X - 16, GRID_Y - 16, GRID_W + 32, GRID_H + 32, 18)
+    panel.lineStyle(8, GOLD, 0.07)
+    panel.strokeRoundedRect(GRID_X - 22, GRID_Y - 22, GRID_W + 44, GRID_H + 44, 24)
+    panel.lineStyle(2, GOLD, 0.4)
+    panel.strokeRoundedRect(GRID_X - 16, GRID_Y - 16, GRID_W + 32, GRID_H + 32, 18)
+
     // Makara hücre zeminleri
     for (let r = 0; r < COLS; r++) {
       for (let row = 0; row < ROWS; row++) {
@@ -92,7 +124,7 @@ export class GameScene extends Phaser.Scene {
             GRID_Y + row * CELL_H + CELL_H / 2,
             CELL_W - 4,
             CELL_H - 4,
-            0x111a2e,
+            0x070b16,
           )
           .setDepth(-2)
       }
@@ -107,31 +139,98 @@ export class GameScene extends Phaser.Scene {
       this.reels.push(container)
     }
 
-    // Altın çerçeve
-    const frame = this.add.graphics().setDepth(6)
-    frame.lineStyle(3, GOLD, 1).strokeRect(GRID_X, GRID_Y, GRID_W, GRID_H)
+    // Makara ayırıcıları (kartların üstünde ince altın dikeyler)
+    const sep = this.add.graphics().setDepth(3)
+    sep.lineStyle(1, GOLD, 0.16)
+    for (let r = 1; r < COLS; r++) {
+      const x = GRID_X + r * CELL_W
+      sep.lineBetween(x, GRID_Y + 6, x, GRID_Y + GRID_H - 6)
+    }
 
-    // Kırpma bantları: grid DIŞINA taşan hücreleri arka plan rengiyle örter
-    // (mask yerine — basit ve WebGL/Canvas'ta aynı çalışır)
+    // Kırpma bantları: AYNI bg dokusunun bölgesel kopyası → gradient kesintisiz
+    // sürer, makara taşmaları şeffaflaşmadan örter (mask yerine — WebGL/Canvas
+    // aynı çalışır)
     const band = (x: number, y: number, w: number, h: number): void => {
-      this.add.rectangle(x + w / 2, y + h / 2, w, h, BG).setDepth(5)
+      this.add.image(0, 0, 'bg').setOrigin(0).setCrop(x, y, w, h).setDepth(5)
     }
     band(0, 0, CANVAS_W, GRID_Y)
     band(0, GRID_Y + GRID_H, CANVAS_W, CANVAS_H - GRID_Y - GRID_H)
     band(0, GRID_Y, GRID_X, GRID_H)
     band(GRID_X + GRID_W, GRID_Y, CANVAS_W - GRID_X - GRID_W, GRID_H)
 
-    // Başlık (sabit) + dinamik banner + kazanç yazısı
+    // Ortam parıltısı: yavaş süzülen altın toz (bantların üstünde, çerçevede
+    // altında — hiçbir sembolü kapatmaz)
     this.add
+      .particles(0, 0, 'spark', {
+        x: { min: 0, max: CANVAS_W },
+        y: { min: 0, max: CANVAS_H },
+        quantity: 1,
+        frequency: 750,
+        lifespan: { min: 4500, max: 7500 },
+        speedX: { min: -10, max: 10 },
+        speedY: { min: -16, max: -4 },
+        scale: { min: 0.12, max: 0.45 },
+        alpha: { start: 0.5, end: 0 },
+        tint: GOLD,
+        blendMode: Phaser.BlendModes.ADD,
+        emitting: true,
+      })
+      .setDepth(5.5)
+
+    // Çift altın çerçeve + köşe elmasları
+    const frame = this.add.graphics().setDepth(6)
+    frame.lineStyle(10, GOLD, 0.06) // dış ışıma (faux glow)
+    frame.strokeRect(GRID_X - 10, GRID_Y - 10, GRID_W + 20, GRID_H + 20)
+    frame.lineStyle(2, GOLD, 0.5)
+    frame.strokeRect(GRID_X - 14, GRID_Y - 14, GRID_W + 28, GRID_H + 28)
+    frame.lineStyle(3, GOLD, 1)
+    frame.strokeRect(GRID_X, GRID_Y, GRID_W, GRID_H)
+    const diamond = (cx: number, cy: number, r: number): void => {
+      frame.fillPoints(
+        [
+          new Phaser.Math.Vector2(cx, cy - r),
+          new Phaser.Math.Vector2(cx + r, cy),
+          new Phaser.Math.Vector2(cx, cy + r),
+          new Phaser.Math.Vector2(cx - r, cy),
+        ],
+        true,
+      )
+    }
+    const cr = 9
+    diamond(GRID_X - 14, GRID_Y - 14, cr)
+    diamond(GRID_X + GRID_W + 14, GRID_Y - 14, cr)
+    diamond(GRID_X + GRID_W + 14, GRID_Y + GRID_H + 14, cr)
+    diamond(GRID_X - 14, GRID_Y + GRID_H + 14, cr)
+
+    // Başlık (sabit) + altın altı çizgi + hafif nabız
+    const title = this.add
       .text(CANVAS_W / 2, 58, 'CLOVER LINK BELLS', {
         fontSize: '40px',
         fontFamily: 'Arial, sans-serif',
         fontStyle: 'bold',
         color: '#f5c542',
+        stroke: '#5b3a00',
+        strokeThickness: 6,
       })
       .setOrigin(0.5)
       .setDepth(20)
+    title.setShadow(0, 3, 'rgba(0, 0, 0, 0.6)', 10)
+    this.tweens.add({
+      targets: title,
+      scale: { from: 1, to: 1.025 },
+      yoyo: true,
+      repeat: -1,
+      duration: 1600,
+      ease: 'Sine.easeInOut',
+    })
 
+    const underline = this.add.graphics().setDepth(19)
+    underline.fillStyle(GOLD, 0.65)
+    underline.fillRoundedRect(CANVAS_W / 2 - 230, 84, 460, 3, 2)
+    diamond(CANVAS_W / 2 - 244, 85, 5)
+    diamond(CANVAS_W / 2 + 244, 85, 5)
+
+    // Dinamik banner + kazanç yazısı (arkasında yumuşak ışıma)
     this.banner = this.add
       .text(CANVAS_W / 2, 136, '', {
         fontSize: '30px',
@@ -144,6 +243,13 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(20)
 
+    this.winGlow = this.add
+      .image(CANVAS_W / 2, GRID_Y + GRID_H + 75, 'spark')
+      .setScale(14, 5)
+      .setAlpha(0)
+      .setDepth(19)
+      .setBlendMode(Phaser.BlendModes.ADD)
+
     this.winText = this.add
       .text(CANVAS_W / 2, GRID_Y + GRID_H + 75, '', {
         fontSize: '52px',
@@ -155,6 +261,7 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
       .setDepth(20)
+    this.winText.setShadow(0, 4, 'rgba(0, 0, 0, 0.7)', 12)
   }
 
   // ────────────────────────────────────────────── statik grid
@@ -183,7 +290,12 @@ export class GameScene extends Phaser.Scene {
   // ────────────────────────────────────────────── animasyon
 
   private animateSpin(columns: readonly (readonly SymbolId[])[]): Promise<void> {
+    this.sfx('spin', { volume: 0.55 })
     this.winText.setText('')
+    this.tweens.killTweensOf(this.winText)
+    this.winText.setScale(1)
+    this.tweens.killTweensOf(this.winGlow)
+    this.winGlow.setAlpha(0)
     this.stopHighlight()
     this.clearGrid()
     return Promise.all(columns.map((col, r) => this.spinReel(r, col))).then(
@@ -198,6 +310,7 @@ export class GameScene extends Phaser.Scene {
   private spinReel(r: number, col: readonly SymbolId[]): Promise<void> {
     const container = this.reels[r]
     container.removeAll(true)
+    this.tweens.killTweensOf(container) // önceki duruş sekmesi
     container.setPosition(GRID_X + r * CELL_W, GRID_Y)
 
     const strip = CLOVER_LINK_BELLS.strips[r]
@@ -238,7 +351,16 @@ export class GameScene extends Phaser.Scene {
           intermediates.forEach((img) => img.destroy())
           finals.forEach((img) => img.setY(img.y - SPIN_STRIPS * CELL_H))
           container.y = GRID_Y
-          resolve()
+          // Duruş "sekmesi" + tık sesi (makaralar sırayla inerken ritim verir)
+          this.sfx('reelstop', { volume: 0.45, rate: 0.94 + r * 0.04 })
+          this.tweens.add({
+            targets: container,
+            y: GRID_Y + 7,
+            duration: 55,
+            yoyo: true,
+            ease: 'Quad.easeOut',
+            onComplete: () => resolve(),
+          })
         },
       })
     })
@@ -247,8 +369,10 @@ export class GameScene extends Phaser.Scene {
   private highlightResult(result: SpinResult): void {
     const positions = new Set<string>()
     const lines = CLOVER_LINK_BELLS.lines
+    let bellWin = false
 
     for (const w of result.lineWins) {
+      if (w.symbol === 'bell') bellWin = true
       const lineRows = lines[w.line]
       if (w.direction === 'ltr') {
         for (let i = 0; i < w.count; i++) positions.add(`${i}:${lineRows[i]}`)
@@ -283,12 +407,33 @@ export class GameScene extends Phaser.Scene {
           duration: 320,
         }),
       )
+      // Altın çerçeve parıltısı (kazanç hücresinin altına oturur)
+      const { x, y } = cellCenter(r, row)
+      const glow = this.add
+        .image(x, y, 'glow-cell')
+        .setDepth(3)
+        .setBlendMode(Phaser.BlendModes.ADD)
+      this.highlightGlows.push(glow)
+      this.highlightTweens.push(
+        this.tweens.add({
+          targets: glow,
+          alpha: { from: 0.35, to: 1 },
+          yoyo: true,
+          repeat: -1,
+          duration: 420,
+        }),
+      )
     }
+
+    // Kazançta zil çalar (Clover Link Bells'in imza sesi)
+    if (bellWin) this.sfx('bell', { volume: 0.7 })
   }
 
   private stopHighlight(): void {
     this.highlightTweens.forEach((t) => t.stop())
     this.highlightTweens = []
+    this.highlightGlows.forEach((g) => g.destroy())
+    this.highlightGlows = []
     for (let r = 0; r < COLS; r++) {
       for (let row = 0; row < ROWS; row++) {
         this.cells[r][row]?.setScale(1)
@@ -297,6 +442,23 @@ export class GameScene extends Phaser.Scene {
   }
 
   private showWin(amount: number): Promise<void> {
+    // Kazanç sesi: büyük kazanç fanfarı eşiği (5× bahis)
+    const bet = useGameStore.getState().bet
+    if (amount >= bet * 5) this.sfx('bigwin', { volume: 0.75 })
+    else this.sfx('win', { volume: 0.6 })
+
+    // Kazanç ışıması + altın parıltı patlaması
+    this.tweens.killTweensOf(this.winGlow)
+    this.winGlow.setAlpha(0)
+    this.tweens.add({
+      targets: this.winGlow,
+      alpha: 0.6,
+      duration: 420,
+      ease: 'Sine.easeOut',
+    })
+    this.burst(CANVAS_W / 2, GRID_Y + GRID_H + 75, GOLD)
+    if (amount >= bet * 5) this.burst(CANVAS_W / 2, GRID_Y + GRID_H / 2, GOLD)
+
     return new Promise((resolve) => {
       const obj = { v: 0 }
       this.tweens.add({
@@ -320,6 +482,38 @@ export class GameScene extends Phaser.Scene {
     })
   }
 
+  /// Kazanç anında altın parıltı patlaması (1 sn sonra kendiliğinden söner)
+  private burst(x: number, y: number, tint: number): void {
+    const em = this.add
+      .particles(x, y, 'spark', {
+        speed: { min: 140, max: 420 },
+        angle: { min: 0, max: 360 },
+        gravityY: 620,
+        lifespan: 850,
+        frequency: -1, // explode modu
+        scale: { start: 1.1, end: 0 },
+        alpha: { start: 1, end: 0 },
+        tint,
+        blendMode: Phaser.BlendModes.ADD,
+      })
+      .setDepth(21)
+    em.explode(30, x, y)
+    this.time.delayedCall(1000, () => em.destroy())
+  }
+
+  /// Grid'de scatter sayımı — ince "parıltı" ipucu sesi için
+  private scatterCue(columns: readonly (readonly SymbolId[])[]): void {
+    let n = 0
+    for (const col of columns) {
+      for (const s of col) {
+        if (s === CLOVER_LINK_BELLS.scatter.symbol) n++
+      }
+    }
+    if (n > 0) {
+      this.sfx('scatter', { volume: n >= 3 ? 0.7 : 0.4 })
+    }
+  }
+
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => {
       if (!this.scene.isActive()) {
@@ -331,7 +525,17 @@ export class GameScene extends Phaser.Scene {
   }
 
   private setBanner(text: string): void {
+    if (this.banner.text === text) return
     this.banner.setText(text)
+    if (text === '') return
+    // Değişimde hafif pop (mesajın "vurması")
+    this.banner.setScale(1.25)
+    this.tweens.add({
+      targets: this.banner,
+      scale: 1,
+      duration: 240,
+      ease: 'Back.easeOut',
+    })
   }
 
   // ────────────────────────────────────────────── bonuslar
@@ -372,6 +576,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private async playLink(link: LinkBonus): Promise<void> {
+    this.sfx('link', { volume: 0.7 })
     this.setBanner('LINK BONUS!')
     await this.delay(700)
 
@@ -385,6 +590,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (link.jackpots.length > 0) {
+      this.sfx('jackpot', { volume: 0.8 })
       this.setBanner(
         `JACKPOT! ${link.jackpots.map((t) => t.toUpperCase()).join(' + ')}`,
       )
@@ -409,6 +615,7 @@ export class GameScene extends Phaser.Scene {
       this.setBanner(`${label}  ×${CLOVER_LINK_BELLS.freeSpins.multiplier}`)
 
       await this.animateSpin(fs.result.columns)
+      this.scatterCue(fs.result.columns)
 
       if (fs.win > 0) {
         useGameStore.getState().stageWin(fs.win)
@@ -431,6 +638,7 @@ export class GameScene extends Phaser.Scene {
 
     try {
       await this.animateSpin(round.base.columns)
+      this.scatterCue(round.base.columns)
 
       if (round.base.totalWin > 0) {
         useGameStore.getState().stageWin(round.base.totalWin)

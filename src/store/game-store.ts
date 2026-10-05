@@ -21,6 +21,32 @@ export function formatMinor(n: number): string {
 
 export const BET_OPTIONS = ALLOWED_BETS
 
+/// Otomatik dönüş ön ayarları (tur sayısı)
+export const AUTO_PRESETS = [10, 25, 50] as const
+export type AutoPreset = (typeof AUTO_PRESETS)[number]
+
+const SOUND_KEY = 'slot_sound'
+
+/// Ses tercihi: localStorage'dan okunur. SSR'da pencere yok → varsayılan açık;
+/// Phaser sahnesi `create()` içinde (hydration SONRASI) çağırır → uyum sorunu yok.
+export function loadSoundPref(): boolean {
+  try {
+    if (typeof window === 'undefined') return true
+    return window.localStorage.getItem(SOUND_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
+function persistSoundPref(on: boolean): void {
+  try {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(SOUND_KEY, on ? '1' : '0')
+  } catch {
+    // gizli mod / kota — tercih kalıcı olmaz, oyun etkilenmez
+  }
+}
+
 /// Sunucu/animasyon durumu — client SADECE durumu gösterir, matematik yapmaz.
 /// Para (balance) sunucudan gelir: `GET /api/state` + `POST /api/spin` yanıtı.
 export type Phase = 'idle' | 'spinning' | 'link' | 'freespins'
@@ -43,6 +69,12 @@ interface GameState {
   fsLabel: string | null
   /// Sunucu/ağ hata mesajı (ör. "Bakiye yetersiz")
   error: string | null
+  /// Otomatik dönüş: null = kapalı, sayı = kalan tur (HUD'dan yönetilir)
+  autoRemaining: number | null
+  /// Otomatik dönüş ön ayarı (başlangıç 10)
+  autoPreset: AutoPreset
+  /// Ses açık mı — Phaser sahnesi bunu sound manager mute'una bağlar
+  soundOn: boolean
 
   setBet: (bet: number) => void
   spin: () => Promise<void>
@@ -52,6 +84,11 @@ interface GameState {
   settle: () => void
   loadBalance: () => Promise<void>
   refill: () => Promise<void>
+  toggleAuto: () => void
+  stopAuto: () => void
+  cycleAutoPreset: () => void
+  decAuto: () => void
+  toggleSound: () => void
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -64,6 +101,9 @@ export const useGameStore = create<GameState>((set, get) => ({
   winShown: 0,
   fsLabel: null,
   error: null,
+  autoRemaining: null,
+  autoPreset: 10,
+  soundOn: true,
 
   setBet: (bet) => {
     if (get().phase === 'idle') set({ bet })
@@ -100,7 +140,8 @@ export const useGameStore = create<GameState>((set, get) => ({
         err instanceof ApiRequestError
           ? err.message
           : 'Ağ hatası — tur işlenmedi'
-      set({ phase: 'idle', round: null, error: message })
+      // Hata → otomatik dönüş DURUR (limit/KYC paneli açılabilir, tekrar yok)
+      set({ phase: 'idle', round: null, error: message, autoRemaining: null })
       // İlgili paneli aç: KYC engeli → giriş, limit engeli → limitler
       if (err instanceof ApiRequestError) openPanelForErrorCode(err.code)
       // Sunucu gerçeğiyle eşitle (402 vb. durumlarda doğru bakiye gelsin)
@@ -144,6 +185,41 @@ export const useGameStore = create<GameState>((set, get) => ({
         error: err instanceof ApiRequestError ? err.message : 'Yenileme başarısız',
       })
     }
+  },
+
+  // ── Otomatik dönüş (Faz 8): HUD etkisi tur bitiminde `decAuto` + yeniden
+  //    `spin` çağırır; hata/yetersiz bakiye durumunda EFFECT veya spin catch
+  //    durdurur (burada yalnızca niyet tutulur — matematik SUNUCUDA).
+
+  toggleAuto: () => {
+    const s = get()
+    if (s.autoRemaining !== null) {
+      set({ autoRemaining: null }) // elle durdur
+      return
+    }
+    set({ autoRemaining: s.autoPreset })
+  },
+
+  stopAuto: () => set({ autoRemaining: null }),
+
+  cycleAutoPreset: () => {
+    const s = get()
+    if (s.autoRemaining !== null) return // çalışırken ön ayar değiştirilemez
+    const i = AUTO_PRESETS.indexOf(s.autoPreset)
+    set({ autoPreset: AUTO_PRESETS[(i + 1) % AUTO_PRESETS.length] })
+  },
+
+  decAuto: () =>
+    set((s) => ({
+      autoRemaining:
+        s.autoRemaining === null ? null : Math.max(0, s.autoRemaining - 1),
+    })),
+
+  // ── Ses (Faz 8): Phaser sahnesi `soundOn` → mute bağlar; tercih kalıcı
+  toggleSound: () => {
+    const next = !get().soundOn
+    persistSoundPref(next)
+    set({ soundOn: next })
   },
 }))
 

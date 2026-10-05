@@ -17,8 +17,42 @@ function useSpinHotkey(canSpin: boolean): void {
   }, [canSpin])
 }
 
+/// Otomatik dönüş sürücüsü (Faz 8): tur `settle` olup phase idle'a dönünce
+/// kısa gecikmeyle bir sonraki turu atar. Durdurma koşulları burada toplanır:
+/// hata (limit/KYC/402), bakiye yetersiz, kalan tur 0, elle durdurma.
+function useAutoSpinDriver(): void {
+  const autoRemaining = useGameStore((s) => s.autoRemaining)
+  const phase = useGameStore((s) => s.phase)
+  const error = useGameStore((s) => s.error)
+  const balance = useGameStore((s) => s.balance)
+  const bet = useGameStore((s) => s.bet)
+
+  useEffect(() => {
+    if (autoRemaining === null) return
+    if (autoRemaining <= 0) {
+      // Geri sayım bitti → temiz kapanış (buton ön ayara döner)
+      useGameStore.getState().stopAuto()
+      return
+    }
+    if (phase !== 'idle') return // tur animasyonda — settle beklenir
+    if (error !== null || balance === null || balance < bet) {
+      useGameStore.getState().stopAuto()
+      return
+    }
+    const timer = setTimeout(() => {
+      const s = useGameStore.getState()
+      // phase senkron kilitli (spin içinde) — bu tick'te yalnızca idle ise at
+      if (s.phase !== 'idle' || s.autoRemaining === null) return
+      void s.spin()
+      useGameStore.getState().decAuto() // bu tur da sayıldı
+    }, 650)
+    return () => clearTimeout(timer)
+  }, [autoRemaining, phase, error, balance, bet])
+}
+
 export function TopBar() {
   const balance = useGameStore((s) => s.balance)
+  const soundOn = useGameStore((s) => s.soundOn)
   const player = useAccountStore((s) => s.player)
 
   return (
@@ -61,6 +95,15 @@ export function TopBar() {
         >
           Limitler
         </button>
+        <button
+          type="button"
+          onClick={() => useGameStore.getState().toggleSound()}
+          className="rounded-full border border-white/20 px-3 py-2 text-sm transition hover:bg-white/5"
+          title={soundOn ? 'Sesi kapat' : 'Sesi aç'}
+          aria-label={soundOn ? 'Sesi kapat' : 'Sesi aç'}
+        >
+          {soundOn ? '🔊' : '🔇'}
+        </button>
         <div className="flex items-center gap-2 rounded-full border border-amber-400/40 bg-slate-900 px-5 py-2 text-sm font-semibold text-slate-300 sm:text-base">
           BAKİYE
           <span className="font-mono text-amber-300">
@@ -79,8 +122,12 @@ export function Controls() {
   const winShown = useGameStore((s) => s.winShown)
   const fsLabel = useGameStore((s) => s.fsLabel)
   const error = useGameStore((s) => s.error)
+  const autoRemaining = useGameStore((s) => s.autoRemaining)
+  const autoPreset = useGameStore((s) => s.autoPreset)
+  useAutoSpinDriver()
 
   const idle = phase === 'idle'
+  const autoRunning = autoRemaining !== null
   const canSpin = idle && balance !== null && balance >= bet
   useSpinHotkey(canSpin)
 
@@ -93,9 +140,11 @@ export function Controls() {
           ? 'LINK BONUS!'
           : phase === 'freespins'
             ? (fsLabel ?? 'BEDAVA DÖNÜŞLER')
-            : winShown > 0
-              ? 'KAZANÇ'
-              : 'HAZIR — ÇEVİR!'
+            : autoRunning
+              ? `OTOMATİK — ${autoRemaining} TUR`
+              : winShown > 0
+                ? 'KAZANÇ'
+                : 'HAZIR — ÇEVİR!'
 
   return (
     <footer className="flex w-full max-w-[1080px] flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/10 bg-slate-900/70 p-4">
@@ -109,7 +158,7 @@ export function Controls() {
             <button
               key={b}
               type="button"
-              disabled={!idle}
+              disabled={!idle || autoRunning}
               onClick={() => useGameStore.getState().setBet(b)}
               className={`rounded-lg border px-3 py-1.5 font-mono text-sm transition disabled:opacity-40 ${
                 bet === b
@@ -127,7 +176,7 @@ export function Controls() {
       <div className="order-3 min-w-[220px] text-center sm:order-none">
         <div
           className={`text-xs font-semibold uppercase tracking-widest ${
-            error ? 'text-rose-400' : 'text-slate-400'
+            error ? 'text-rose-400' : autoRunning ? 'text-amber-300' : 'text-slate-400'
           }`}
         >
           {error ?? statusLabel}
@@ -141,7 +190,7 @@ export function Controls() {
         </div>
       </div>
 
-      {/* SPIN / bakiye yenileme */}
+      {/* Otomatik dönüş + SPIN / bakiye yenileme */}
       <div className="flex items-center gap-3">
         {!canSpin && balance !== null && balance < bet && idle && (
           <button
@@ -152,6 +201,38 @@ export function Controls() {
             Demo bakiye yükle
           </button>
         )}
+
+        {/* Otomatik dönüş: ön ayar (10/25/50) + başlat/durdur */}
+        <div className="flex flex-col items-center gap-1">
+          <button
+            type="button"
+            disabled={autoRunning || !idle}
+            onClick={() => useGameStore.getState().cycleAutoPreset()}
+            className="rounded-lg border border-white/10 px-2.5 py-1 font-mono text-xs text-slate-400 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+            title="Otomatik dönüş tur sayısı"
+          >
+            ×{autoPreset}
+          </button>
+          <button
+            type="button"
+            onClick={() => useGameStore.getState().toggleAuto()}
+            className={`rounded-xl border px-4 py-2.5 text-sm font-bold transition ${
+              autoRunning
+                ? 'border-rose-400/60 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20'
+                : canSpin
+                  ? 'border-amber-400/50 bg-amber-400/10 text-amber-300 hover:bg-amber-400/20'
+                  : 'border-white/10 text-slate-500'
+            }`}
+            title={
+              autoRunning
+                ? 'Otomatik dönüşü durdur'
+                : `Otomatik ${autoPreset} tur başlat`
+            }
+          >
+            {autoRunning ? `AUTO ■ ${autoRemaining}` : `AUTO ▶ ×${autoPreset}`}
+          </button>
+        </div>
+
         <button
           type="button"
           disabled={!canSpin}
