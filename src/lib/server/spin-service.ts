@@ -20,8 +20,9 @@ function sha256(text: string): string {
 }
 
 /// Oyun VERİSİ'nin parmak izi — config değişince denetçi satırları
-/// hangi matematikle üretildiğini ayırt edebilir.
-const CONFIG_HASH = sha256(JSON.stringify(CLOVER_LINK_BELLS))
+/// hangi matematikle üretildiğini ayırt edebilir. (Faz6'da eski
+/// config'ler saklanıp sürümüyle replay edilecek.)
+export const CURRENT_CONFIG_HASH = sha256(JSON.stringify(CLOVER_LINK_BELLS))
 
 export function roundHash(round: SpinRound): string {
   return sha256(JSON.stringify(round))
@@ -177,7 +178,7 @@ export function performSpin(
         round.totalWin,
         finalBalance,
         roundHash(round),
-        CONFIG_HASH,
+        CURRENT_CONFIG_HASH,
         force,
         Date.now(),
       )

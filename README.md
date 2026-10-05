@@ -11,11 +11,13 @@ motoru** ve Next.js 16 sarmalayıcısı. Hedef: **gerçek para / lisanslı** kul
 
 ```bash
 npm run dev        # Next.js geliştirme sunucusu
-npm test           # Vitest (58 test: RNG, değerlendirme, bonus, sim, cüzdan/ledger)
+npm test           # Vitest (79 test: RNG, motor, bonus, cüzdan, property-based, denetim)
 npm run typecheck  # tsc --noEmit
 npm run lint       # eslint
 npm run build && npm start   # üretim derlemesi + sunucu (http://localhost:3000)
 npm run sim -- 1000000 <seed> [bet]   # RTP/volatilite simülasyonu
+npm run gate [-- spins seed]   # CI RTP kapısı (kalibre bantlar, exit 1 = kapalı)
+npm run audit [-- dbPath]      # denetçi replay aracı (R1-L3 raporu, exit 1 = bulgu)
 ```
 
 Denetim veritabanı: `node:sqlite` (yerleşik, bağımlılık yok) → `.data/slot.db`
@@ -73,6 +75,28 @@ Paranın tek kapısı sunucudur — istemcide matematik ve bakiye **yoktur**:
   sunucuda — development'ta açık, production'da yalnızca `SLOT_ALLOW_FORCE=1`.
   Kullanılan seed (`force-link-92` gibi) ve `forced` işareti kayda düşer.
 
+## Regresyon kapıları ve property testler (Faz 5)
+
+- **Property-based test** (fast-check): tek örnek değil, rastgeel girdi
+  uzayı zorlar — determinizm, `totalWin = base+link+fs` kompozisyonu,
+  **lineer bahis ölçeklemesi** (`win(k·bet) = k·win(bet)` tam eşitlik —
+  para kaçırıcı her yuvarlama hatası bu özelliği kırar), tamsayı/lineBet
+  katı para, link hücre toplamı, FS `result×çarpan`, RNG durum
+  geri yükleme (replay temeli) ve **cüzdan durum makinesi** (rastgeel
+  spin/refill/idempotency dizilerinde ledger invariantı her adımda).
+- **RTP kapısı**: `npm run gate` → 2M spin, seed `rtp-gate-1`
+  (deterministik = tekrarlanabilir); bantlar kalibrasyonla kilitli
+  (RTP %95.40–96.60, katkılar, hit, tetik frekansları, max win, σ).
+  Bant dışına çıkan her matematik değişikliği **exit 1 → CI düşer**
+  (`.github/workflows/ci.yml`).
+- **Denetçi replay aracı**: `npm run audit` → tüm round'ları seed'den
+  yeniden üretir (R1), config sürümünü (R2 = değişiklik kontrolü),
+  ledger zincirini (L1), `SUM(amount)==balance` invariantını (L2) ve
+  BET/WIN↔round bağlarını (L3) raporlar. Motor `audit.ts` içinde ve
+  **bozuk seed/config/zincir senaryolarıyla test ediliyor**.
+- Kontrol haritası + üretim öncesi boşluklar:
+  [`docs/CERTIFICATION.md`](docs/CERTIFICATION.md)
+
 ## Oyun kuralları (v1)
 
 - **5 makara × 3 satır, 20 çizgi, both-ways** (LTR + RTL), para **tamsayı**
@@ -113,7 +137,7 @@ Ayrıntılar: [`docs/CALIBRATION.md`](docs/CALIBRATION.md)
 - [x] **Faz 2** — Bonus mekaniği (Link respin + Free spins) ve **RTP kalibrasyonu → %96**
 - [x] **Faz 3** — Otoriter spin endpoint'i + cüzdan (BET/WIN ledger, idempotency, replay denetimi)
 - [x] **Faz 4** — Phaser istemcisi (reel animasyonları, Link/FS bonus sahneleri, HUD)
-- [ ] **Faz 5** — Property-based test + CI RTP kapısı + sertifikasyon hazırlığı
+- [x] **Faz 5** — Property-based test + CI RTP kapısı + sertifikasyon hazırlığı
 - [ ] **Faz 6** — Telemetri, config versiyonlama, yayın
 
 ### Demo istemci notları

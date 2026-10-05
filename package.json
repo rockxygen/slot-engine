@@ -10,7 +10,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "sim": "tsx src/lib/engine/sim-cli.ts"
+    "sim": "tsx src/lib/engine/sim-cli.ts",
+    "gate": "tsx src/lib/engine/rtp-gate-cli.ts",
+    "audit": "tsx src/lib/server/audit-cli.ts"
   },
   "dependencies": {
     "next": "16.3.8",
