@@ -1,6 +1,14 @@
 import { create } from 'zustand'
+import {
+  ApiRequestError,
+  currentForce,
+  fetchBalance,
+  newClientRequestId,
+  refillBalance,
+  requestSpin,
+} from '@/lib/api-client'
+import { ALLOWED_BETS } from '@/lib/api-types'
 import type { SpinRound } from '@/lib/engine'
-import { nextDemoRound } from '@/lib/demo-round'
 
 /// Para minor birimdedir (kuruş) — motorla aynı para birimi.
 export function formatMinor(n: number): string {
@@ -10,63 +18,92 @@ export function formatMinor(n: number): string {
   })
 }
 
-export const BET_OPTIONS = [100, 200, 500, 1000] as const
-export const START_BALANCE = 50_000 // 500,00 ₺ demo bakiye
+export const BET_OPTIONS = ALLOWED_BETS
 
-/// Sunucu/animasyon durumu — client SADECE durumu gösterir,
-/// tur sonucunu asla hesaplamaz (result `round` olarak gelir).
+/// Sunucu/animasyon durumu — client SADECE durumu gösterir, matematik yapmaz.
+/// Para (balance) sunucudan gelir: `GET /api/state` + `POST /api/spin` yanıtı.
 export type Phase = 'idle' | 'spinning' | 'link' | 'freespins'
 
 interface GameState {
-  balance: number
+  /// Sunucu gerçeği (null = henüz yüklenmedi)
+  balance: number | null
+  /// Tur sonrası bakiye — sahne `settle()` çağırınca görünür olur
+  /// (klasik slot hissi: para, kazanç animasyonunun SONUNDA yürürlüğe girer)
+  pendingBalance: number | null
   bet: number
   phase: Phase
-  /// Sunucudan (demo: yerel motordan) gelen TAM tur
+  /// Sunucudan gelen TAM tur — istemci bunu yalnızca oynatır
   round: SpinRound | null
-  /// Her SPIN'de 1 artar; Phaser sahnesi bunu görünce oynatır
+  /// Her başarılı spin yanıtında 1 artar; Phaser sahnesi bunu görür
   spinId: number
   /// HUD'da biriken gösterim kazancı (money ≠ display)
   winShown: number
-  /// FS sırasında "FREE SPINS 3/13" etiketi
+  /// FS sırasında "BEDAVA DÖNÜŞ 3/13" etiketi
   fsLabel: string | null
+  /// Sunucu/ağ hata mesajı (ör. "Bakiye yetersiz")
+  error: string | null
 
   setBet: (bet: number) => void
-  spin: () => void
+  spin: () => Promise<void>
   stageWin: (amount: number) => void
   setPhase: (phase: Phase) => void
   setFsLabel: (label: string | null) => void
   settle: () => void
-  refill: () => void
+  loadBalance: () => Promise<void>
+  refill: () => Promise<void>
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
-  balance: START_BALANCE,
+  balance: null,
+  pendingBalance: null,
   bet: 200,
   phase: 'idle',
   round: null,
   spinId: 0,
   winShown: 0,
   fsLabel: null,
+  error: null,
 
   setBet: (bet) => {
     if (get().phase === 'idle') set({ bet })
   },
 
-  spin: () =>
-    set((s) => {
-      if (s.phase !== 'idle' || s.balance < s.bet) return {}
-      // DEMO kaynağı: turu yerel motor üretir. Faz 3'te bu tek satır
-      // `POST /api/spin` çağrısına döner — dönen tip (SpinRound) aynı.
-      const round = nextDemoRound(s.bet)
-      return {
-        balance: s.balance - s.bet,
-        round,
-        spinId: s.spinId + 1,
-        winShown: 0,
-        phase: 'spinning' as Phase,
-        fsLabel: null,
-      }
-    }),
+  spin: async () => {
+    const s = get()
+    // Çift tıklama koruması: phase senkron yazılır, await ÖNCESİ kilitlenir
+    if (s.phase !== 'idle' || s.balance === null || s.balance < s.bet) return
+
+    set({
+      phase: 'spinning',
+      error: null,
+      round: null,
+      pendingBalance: null,
+      winShown: 0,
+      fsLabel: null,
+    })
+
+    try {
+      const res = await requestSpin(
+        s.bet,
+        newClientRequestId(),
+        currentForce(),
+      )
+      // Tur + gerçek bakiye geldi: SAHNEYE tek atomik set
+      set({
+        round: res.round,
+        pendingBalance: res.balance,
+        spinId: get().spinId + 1,
+      })
+    } catch (err) {
+      const message =
+        err instanceof ApiRequestError
+          ? err.message
+          : 'Ağ hatası — tur işlenmedi'
+      set({ phase: 'idle', round: null, error: message })
+      // Sunucu gerçeğiyle eşitle (402 vb. durumlarda doğru bakiye gelsin)
+      void get().loadBalance()
+    }
+  },
 
   stageWin: (amount) => set((s) => ({ winShown: s.winShown + amount })),
 
@@ -76,15 +113,35 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   settle: () =>
     set((s) => {
-      if (s.phase === 'idle') return {} // çift settle koruması (para iki kez eklenmesin)
-      return {
-        balance: s.balance + (s.round?.totalWin ?? 0),
-        phase: 'idle',
-        fsLabel: null,
+      if (s.phase === 'idle') return {} // çift settle koruması
+      const next: Partial<GameState> = { phase: 'idle', fsLabel: null }
+      if (s.pendingBalance !== null) {
+        // Sunucu çoktan ödedi; yalnızca GÖSTERİMİ bu an güncellenir
+        next.balance = s.pendingBalance
+        next.pendingBalance = null
       }
+      return next
     }),
 
-  refill: () => set({ balance: get().balance + START_BALANCE }),
+  loadBalance: async () => {
+    try {
+      set({ balance: await fetchBalance(), error: null })
+    } catch (err) {
+      set({
+        error: err instanceof ApiRequestError ? err.message : 'Bakiye yüklenemedi',
+      })
+    }
+  },
+
+  refill: async () => {
+    try {
+      set({ balance: await refillBalance(), error: null })
+    } catch (err) {
+      set({
+        error: err instanceof ApiRequestError ? err.message : 'Yenileme başarısız',
+      })
+    }
+  },
 }))
 
 /// DEBUG: sayfa konsolundan durumu gözlemlemek için (demo/CI smoke testi).

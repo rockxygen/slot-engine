@@ -26,7 +26,9 @@ export function TopBar() {
       </h1>
       <div className="flex items-center gap-2 rounded-full border border-amber-400/40 bg-slate-900 px-5 py-2 text-sm font-semibold text-slate-300 sm:text-base">
         BAKİYE
-        <span className="font-mono text-amber-300">{formatMinor(balance)} ₺</span>
+        <span className="font-mono text-amber-300">
+          {balance === null ? '…' : `${formatMinor(balance)} ₺`}
+        </span>
       </div>
     </header>
   )
@@ -38,21 +40,24 @@ export function Controls() {
   const phase = useGameStore((s) => s.phase)
   const winShown = useGameStore((s) => s.winShown)
   const fsLabel = useGameStore((s) => s.fsLabel)
+  const error = useGameStore((s) => s.error)
 
   const idle = phase === 'idle'
-  const canSpin = idle && balance >= bet
+  const canSpin = idle && balance !== null && balance >= bet
   useSpinHotkey(canSpin)
 
   const statusLabel =
-    phase === 'spinning'
-      ? 'ÇEVİRİLİYOR…'
-      : phase === 'link'
-        ? 'LINK BONUS!'
-        : phase === 'freespins'
-          ? (fsLabel ?? 'BEDAVA DÖNÜŞLER')
-          : winShown > 0
-            ? 'KAZANÇ'
-            : 'HAZIR — ÇEVİR!'
+    balance === null
+      ? 'BAKİYE YÜKLENİYOR…'
+      : phase === 'spinning'
+        ? 'ÇEVİRİLİYOR…'
+        : phase === 'link'
+          ? 'LINK BONUS!'
+          : phase === 'freespins'
+            ? (fsLabel ?? 'BEDAVA DÖNÜŞLER')
+            : winShown > 0
+              ? 'KAZANÇ'
+              : 'HAZIR — ÇEVİR!'
 
   return (
     <footer className="flex w-full max-w-[1080px] flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/10 bg-slate-900/70 p-4">
@@ -80,10 +85,14 @@ export function Controls() {
         </div>
       </div>
 
-      {/* Durum + kazanç */}
+      {/* Durum + kazanç + hata */}
       <div className="order-3 min-w-[220px] text-center sm:order-none">
-        <div className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-          {statusLabel}
+        <div
+          className={`text-xs font-semibold uppercase tracking-widest ${
+            error ? 'text-rose-400' : 'text-slate-400'
+          }`}
+        >
+          {error ?? statusLabel}
         </div>
         <div
           className={`font-mono text-2xl font-bold ${
@@ -96,10 +105,10 @@ export function Controls() {
 
       {/* SPIN / bakiye yenileme */}
       <div className="flex items-center gap-3">
-        {!canSpin && balance < bet && idle && (
+        {!canSpin && balance !== null && balance < bet && idle && (
           <button
             type="button"
-            onClick={() => useGameStore.getState().refill()}
+            onClick={() => void useGameStore.getState().refill()}
             className="rounded-xl border border-rose-400/50 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-rose-300 hover:bg-rose-500/20"
           >
             Demo bakiye yükle
