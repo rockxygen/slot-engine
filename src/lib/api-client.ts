@@ -1,6 +1,12 @@
 import type {
   ApiErrorBody,
   ApiErrorCode,
+  AuthResponse,
+  KycStatus,
+  LimitsResponse,
+  LimitsState,
+  MeResponse,
+  Player,
   SpinForce,
   SpinRequest,
   SpinResponse,
@@ -94,4 +100,68 @@ export async function refillBalance(): Promise<number> {
     method: 'POST',
   })
   return data.balance
+}
+
+/// ── Hesap / KYC (Faz 7 UI)
+
+function postJson<T>(path: string, body: unknown): Promise<T> {
+  return request<T>(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+/// Mevcut oturumun oyuncusu (null = anonim demo oturumu)
+export async function fetchMe(): Promise<Player | null> {
+  const data = await request<MeResponse>('/api/auth/me')
+  return data.player
+}
+
+export async function registerAccount(
+  username: string,
+  password: string,
+): Promise<Player> {
+  const data = await postJson<AuthResponse>('/api/auth/register', {
+    username,
+    password,
+  })
+  return data.player
+}
+
+export async function loginAccount(
+  username: string,
+  password: string,
+): Promise<Player> {
+  const data = await postJson<AuthResponse>('/api/auth/login', {
+    username,
+    password,
+  })
+  return data.player
+}
+
+export async function logoutAccount(): Promise<void> {
+  await postJson<{ ok: true }>('/api/auth/logout', {})
+}
+
+/// Demo KYC stub — gerçek entegrasyonda sağlayıcı webhook'u çağırır
+export async function requestKyc(status: KycStatus): Promise<Player> {
+  const data = await postJson<AuthResponse>('/api/auth/kyc', { status })
+  return data.player
+}
+
+/// ── Sorumlu oyun limitleri
+
+export async function fetchLimits(): Promise<LimitsResponse> {
+  return request<LimitsResponse>('/api/limits')
+}
+
+export async function updateLimits(
+  patch: Partial<LimitsState>,
+): Promise<LimitsResponse> {
+  return request<LimitsResponse>('/api/limits', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
 }

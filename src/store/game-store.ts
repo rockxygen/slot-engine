@@ -7,6 +7,7 @@ import {
   refillBalance,
   requestSpin,
 } from '@/lib/api-client'
+import { openPanelForErrorCode } from '@/store/account-store'
 import { ALLOWED_BETS } from '@/lib/api-types'
 import type { SpinRound } from '@/lib/engine'
 
@@ -100,6 +101,8 @@ export const useGameStore = create<GameState>((set, get) => ({
           ? err.message
           : 'Ağ hatası — tur işlenmedi'
       set({ phase: 'idle', round: null, error: message })
+      // İlgili paneli aç: KYC engeli → giriş, limit engeli → limitler
+      if (err instanceof ApiRequestError) openPanelForErrorCode(err.code)
       // Sunucu gerçeğiyle eşitle (402 vb. durumlarda doğru bakiye gelsin)
       void get().loadBalance()
     }

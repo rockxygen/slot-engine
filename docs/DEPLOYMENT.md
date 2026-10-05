@@ -166,14 +166,18 @@ SLOT_AUDIT_SINK=https://… npm run audit:export -- --ship   # uzak uç noktaya 
 **Limitler** (`GET/PUT /api/limits`): `lossLimit` (net kayıp), `spendLimit`
 (ciro), `sessionLimitSec` (açılıştan süre) — `performSpin` öncesi sunucuda
 zorlanır; `null` = sınırsız. Demo varsayılanı sınırsızdır; **lisanslı
-yayında hesap açılışında zorunlu varsayılanlar** konur (ürün kararı) ve
-HUD'da gösterilir.
+yayında hesap açılışında zorunlu varsayılanlar** konur (ürün kararı).
+**HUD**: TopBar'daki **Limitler** paneli kullanımı (net/ciro/süre) ve
+limit girişlerini gösterir (₺/dk → kuruş/saniye dönüşümü `limit-input.ts`,
+testli); engelde panel otomatik açılır.
 
 **KYC politikası**: `SLOT_REQUIRE_KYC=1` → yalnızca `kyc_status=verified`
 oyuncu tur oynayabilir (anonim demo kapalı). Akış:
 `POST /api/auth/register|login` → oturum oyuncuya bağlanır →
 `kyc_status=pending` iken tur **403 `kyc_required`** → sağlayıcı onayı
 (`setKycStatus` / demo stub `POST /api/auth/kyc`) → oyun açılır.
+**HUD**: TopBar'daki **Giriş** paneliyle kayıt/giriş/KYC/demo onay yapılır
+(engelde panel otomatik açılır).
 
 ```bash
 curl -c jar -X POST localhost:3000/api/auth/register \
@@ -187,5 +191,6 @@ curl -b jar -X POST localhost:3000/api/spin …            # 200 (oyun açık)
 
 ## 11. Bilinen boşluklar
 
-Lisanslı/gerçek para öncesi kalanlar: `docs/CERTIFICATION.md` §7
-(entropi kaynağı, hesap/KYC, WORM uzak kopya, sorumlu oyun limitleri).
+Lisanslı/gerçek para öncesi kalanlar: `docs/CERTIFICATION.md` §7 — kod
+tarafı kapanan başlıkların **dış bağımlılıkları** (laboratuvar RNG onayı,
+KYC sağlayıcısı, TLS sonlandırması, cron zamanlaması).

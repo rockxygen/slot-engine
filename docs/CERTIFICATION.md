@@ -100,7 +100,8 @@
       `SLOT_REQUIRE_KYC=1` ile anonim oyun tamamen kapanır (lisanslı
       yayında bu açık olmalı). KYC onayının kendisi sağlayıcı webhook'u
       → `setKycStatus` ile girer (`POST /api/auth/kyc` demo stub'ı).
-      **Dış kalan:** KYC sağlayıcısı + giriş UI'ı.
+      **UI hazır** (HUD: giriş/kayıt + KYC rozeti, `account-panel.tsx`;
+      engelde ilgili panel otomatik açılır). **Dış kalan:** KYC sağlayıcısı.
 - [x] **TLS / Secure cookie (Faz 7 — ölçüm TAMAM)**: `npm run doctor`
       üretim postürünü **kodla ölçer** (NODE_ENV, force kapısı kapalı mı,
       cookie `Secure` aktif mi, DB quick_check, snapshot yazılabilirlik,
@@ -115,9 +116,9 @@
 - [x] **Sorumlu oyun limitleri (Faz 7 — zorlama TAMAM)**: kayıp / ciro /
       oturum süresi limitleri **sunucuda** `performSpin` öncesi zorlanır
       (`403 limit_exceeded`, hangi limit olduğu mesajda; ihlalde iz yok),
-      `GET/PUT /api/limits` ile görüntüleme/ayar. **Kalan:** HUD'da
-      gösterim ve hesap açılışında zorunlu limit varsayılanları (ürün
-      kararı).
+      `GET/PUT /api/limits` ile görüntüleme/ayar; **HUD paneli hazır**
+      (Limitler paneli: kullanım özeti + ₺/dk formları). **Kalan:** hesap
+      açılışında zorunlu limit varsayılanları (ürün kararı).
 - [x] **Config sürümleme (Faz 6 — TAMAM)**: eski config snapshot'ları
       saklanır, R2 sürüm üzerinden replay eder; `config-versions.ts` +
       `config-versions.test.ts` + `docs/DEPLOYMENT.md §7` (snapshot'lar

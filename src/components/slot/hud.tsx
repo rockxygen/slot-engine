@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react'
 import { BET_OPTIONS, formatMinor, useGameStore } from '@/store/game-store'
+import { useAccountStore } from '@/store/account-store'
 
 function useSpinHotkey(canSpin: boolean): void {
   useEffect(() => {
@@ -18,17 +19,54 @@ function useSpinHotkey(canSpin: boolean): void {
 
 export function TopBar() {
   const balance = useGameStore((s) => s.balance)
+  const player = useAccountStore((s) => s.player)
 
   return (
     <header className="flex w-full max-w-[1080px] items-center justify-between gap-4">
       <h1 className="text-2xl font-black tracking-wide text-amber-300 sm:text-3xl">
         🍀 CLOVER LINK BELLS
       </h1>
-      <div className="flex items-center gap-2 rounded-full border border-amber-400/40 bg-slate-900 px-5 py-2 text-sm font-semibold text-slate-300 sm:text-base">
-        BAKİYE
-        <span className="font-mono text-amber-300">
-          {balance === null ? '…' : `${formatMinor(balance)} ₺`}
-        </span>
+      <div className="flex items-center gap-2">
+        {/* Hesap + limit paneli tetikleyicileri (Faz 7 UI) */}
+        <button
+          type="button"
+          onClick={() => useAccountStore.getState().openPanel('account')}
+          className={`flex items-center gap-1.5 rounded-full border px-4 py-2 text-sm font-semibold transition hover:bg-white/5 ${
+            player === null
+              ? 'border-white/20 text-slate-300'
+              : player.kycStatus === 'verified'
+                ? 'border-emerald-400/40 text-emerald-300'
+                : player.kycStatus === 'pending'
+                  ? 'border-amber-400/40 text-amber-300'
+                  : 'border-rose-400/40 text-rose-300'
+          }`}
+          title={player ? `${player.username} — ${player.kycStatus}` : 'Giriş / kayıt'}
+        >
+          {player === null ? '👤 Giriş' : `👤 ${player.username}`}
+          {player && (
+            <span aria-hidden>
+              {player.kycStatus === 'verified'
+                ? '✓'
+                : player.kycStatus === 'pending'
+                  ? '…'
+                  : '!'}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={() => useAccountStore.getState().openPanel('limits')}
+          className="rounded-full border border-white/20 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/5"
+          title="Sorumlu oyun limitleri"
+        >
+          Limitler
+        </button>
+        <div className="flex items-center gap-2 rounded-full border border-amber-400/40 bg-slate-900 px-5 py-2 text-sm font-semibold text-slate-300 sm:text-base">
+          BAKİYE
+          <span className="font-mono text-amber-300">
+            {balance === null ? '…' : `${formatMinor(balance)} ₺`}
+          </span>
+        </div>
       </div>
     </header>
   )

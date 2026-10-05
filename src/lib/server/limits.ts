@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
+import type { LimitsState } from '@/lib/api-types'
 
 /// ─────────────────────────────── sorumlu oyun limitleri (Faz 7 · §7)
 ///
@@ -11,14 +12,8 @@ import type { DatabaseSync } from 'node:sqlite'
 /// DEĞİL, YENİ tur kabul edilmeden önce. İhlal → tur yazılmaz, para
 /// hareketi olmaz (iz yok).
 
-export interface SessionLimits {
-  /// Net kayıp (toplam bahis − toplam kazanç) bu değere ulaşırsa dur
-  lossLimit: number | null
-  /// Toplam ciro + bu bahis limiti aşarsa dur
-  spendLimit: number | null
-  /// Oturum açılışından itibaren süre (saniye) aşılırsa dur
-  sessionLimitSec: number | null
-}
+/// Limit durumu sözleşmesi ortak tipte (`api-types.ts` — istemci/sunucu tek kaynak)
+export type SessionLimits = LimitsState
 
 export type LimitId = 'loss_limit' | 'spend_limit' | 'session_time'
 

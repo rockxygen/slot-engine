@@ -1,21 +1,8 @@
 import { NextResponse } from 'next/server'
 import { getDb } from '@/lib/server/db'
-import {
-  getLimits,
-  limitUsage,
-  setLimits,
-  type SessionLimits,
-} from '@/lib/server/limits'
+import { getLimits, limitUsage, setLimits } from '@/lib/server/limits'
 import { getOrCreateSessionId } from '@/lib/server/session'
-
-export interface LimitsResponse {
-  readonly limits: SessionLimits
-  readonly usage: {
-    readonly netLoss: number
-    readonly spend: number
-    readonly playSeconds: number
-  }
-}
+import type { LimitsResponse, LimitsState } from '@/lib/api-types'
 
 const LIMIT_KEYS = ['lossLimit', 'spendLimit', 'sessionLimitSec'] as const
 
@@ -52,7 +39,7 @@ export async function PUT(
     )
   }
   const body = raw as Record<string, unknown>
-  const patch: Partial<SessionLimits> = {}
+  const patch: Partial<LimitsState> = {}
   for (const key of LIMIT_KEYS) {
     if (key in body) {
       const v = body[key]

@@ -44,3 +44,38 @@ export interface ApiErrorBody {
   error: ApiErrorCode
   message: string
 }
+
+/// ── Hesap / KYC sözleşmesi (Faz 7 UI — istemci ↔ sunucu ortak tip)
+export type KycStatus = 'pending' | 'verified' | 'rejected'
+
+export interface Player {
+  readonly id: string
+  readonly username: string
+  readonly kycStatus: KycStatus
+}
+
+export interface AuthResponse {
+  readonly player: Player
+}
+
+export interface MeResponse {
+  readonly player: Player | null
+}
+
+/// ── Sorumlu oyun limitleri sözleşmesi
+export interface LimitsState {
+  lossLimit: number | null
+  spendLimit: number | null
+  sessionLimitSec: number | null
+}
+
+export interface LimitsUsage {
+  readonly netLoss: number
+  readonly spend: number
+  readonly playSeconds: number
+}
+
+export interface LimitsResponse {
+  readonly limits: LimitsState
+  readonly usage: LimitsUsage
+}

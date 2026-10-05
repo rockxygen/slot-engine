@@ -1,14 +1,21 @@
 'use client'
 
 import { useEffect } from 'react'
+import { useAccountStore } from '@/store/account-store'
 import { useGameStore } from '@/store/game-store'
+import { AccountPanel } from './account-panel'
 import { Controls, TopBar } from './hud'
 import { GameCanvas } from './game-canvas'
 
 export function SlotScreen() {
-  // Açılışta bakiye SUNUCUDAN okunur (oto-refresh / yenileme sonrası kalıcı)
+  // Açılışta bakiye SUNUCUDAN okunur (oto-refresh / yenileme sonrası kalıcı).
+  // Hesap durumu bakiyeden SONRA okunur: iki paralel ilk-istek iki ayrı
+  // oturum açabilirdi (cookie yarışı) — zincirleme tek oturum güvencesi.
   useEffect(() => {
-    void useGameStore.getState().loadBalance()
+    void useGameStore
+      .getState()
+      .loadBalance()
+      .finally(() => useAccountStore.getState().refreshAccount())
   }, [])
 
   return (
@@ -21,6 +28,7 @@ export function SlotScreen() {
         ile sunucuda üretilir, cüzdana BET/WIN ledger olarak yazılır — sayfa
         yenilense de bakiye kalıcıdır. İstemcide matematik yoktur.
       </p>
+      <AccountPanel />
     </main>
   )
 }

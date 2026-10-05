@@ -11,7 +11,7 @@ motoru** ve Next.js 16 sarmalayıcısı. Hedef: **gerçek para / lisanslı** kul
 
 ```bash
 npm run dev        # Next.js geliştirme sunucusu
-npm test           # Vitest (120 test: RNG, motor, bonus, cüzdan, property, denetim, telemetri, limit, KYC)
+npm test           # Vitest (137 test: RNG, motor, bonus, cüzdan, property, denetim, telemetri, limit, KYC, UI)
 npm run typecheck  # tsc --noEmit
 npm run lint       # eslint
 npm run build && npm start   # üretim derlemesi + sunucu (http://localhost:3000)
@@ -145,6 +145,9 @@ Paranın tek kapısı sunucudur — istemcide matematik ve bakiye **yoktur**:
 - **Hesap/KYC**: `players` + scrypt parola + register/login/logout,
   `kyc_status` kapısı — `pending`/`rejected` tur oynayamaz; anonim oyun
   `SLOT_REQUIRE_KYC=1` ile tamamen kapanır. Detay: `docs/DEPLOYMENT.md §10`.
+- **UI**: TopBar'dan **Giriş** (kayıt/giriş/KYC demo onay) ve **Limitler**
+  (net/ciro/süre kullanımı + ₺/dk formu) panelleri; `kyc_required` /
+  `limit_exceeded` engelinde ilgili panel otomatik açılır.
 
 ## Oyun kuralları (v1)
 

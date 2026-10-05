@@ -5,6 +5,9 @@ import {
 } from 'node:crypto'
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
+import type { KycStatus, Player } from '@/lib/api-types'
+
+export type { KycStatus, Player }
 
 /// ────────────────────────────── hesap / KYC katmanı (Faz 7 · §7)
 ///
@@ -25,14 +28,6 @@ import type { DatabaseSync } from 'node:sqlite'
 ///
 /// Oturum (HttpOnly cookie) DEĞİŞMEZ — onun altına oyuncu BAĞI eklenir;
 /// bakiye/ledger oturumda kalır (kimlik ile para ayrıdır).
-
-export type KycStatus = 'pending' | 'verified' | 'rejected'
-
-export interface Player {
-  readonly id: string
-  readonly username: string
-  readonly kycStatus: KycStatus
-}
 
 const USERNAME_RE = /^[a-z0-9_\-]{3,32}$/
 const MIN_PASSWORD = 8
