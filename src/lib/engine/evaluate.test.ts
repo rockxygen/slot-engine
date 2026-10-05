@@ -29,6 +29,16 @@ const TEST_CONFIG: GameConfig = {
     jackpotChance: 0,
     stepCounts: { 0: 1 },
   },
+  bell: {
+    symbol: 'bell',
+    triggerCount: 5,
+    respinCount: 3,
+    cellCount: 15,
+    values: { 1: 100 },
+    jackpotChance: 0,
+    stepCounts: { 0: 1 },
+    fullMultiplier: 3,
+  },
   jackpot: {
     spinChance: 0,
     tiers: {

@@ -1,12 +1,19 @@
 import type { Rng } from './rng'
-import type { JackpotConfig, JackpotHit, JackpotRule, JackpotTier } from './types'
+import type {
+  JackpotConfig,
+  JackpotHit,
+  JackpotRule,
+  JackpotTier,
+  JackpotTierTable,
+} from './types'
 
 /// `tiers` ağırlıkları arasından deterministik kademe seçimi.
 /// Kullanım: normal spin düşüşü (drawSpinJackpot) ve Link bonusu
 /// hücresi (bonus.ts) — tek ağırlık tablosu = tek gerçek.
+/// (Tablo partial olabilir: Faz 9 öncesi `link.jackpots`'ta `maxi` yok.)
 export function pickJackpotTier(
   rng: Rng,
-  tiers: Readonly<Record<JackpotTier, JackpotRule>>,
+  tiers: JackpotTierTable,
 ): JackpotTier {
   const entries = Object.entries(tiers) as [JackpotTier, JackpotRule][]
   const total = entries.reduce((s, [, rule]) => s + rule.weight, 0)

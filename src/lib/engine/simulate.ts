@@ -15,13 +15,15 @@ export interface SimStats {
   readonly bet: number
   readonly totalBet: number
   readonly totalWin: number
-  /// TOPLAM RTP = (base + jackpot + link + freeSpins) / totalBet — hedef metrik
+  /// TOPLAM RTP = (base + jackpot + link + bell + freeSpins) / totalBet — hedef metrik
   readonly rtp: number
-  /// Katkı payları (aynı toplamı verirler, rtp = baseRtp+jackpotRtp+linkRtp+fsRtp)
+  /// Katkı payları (aynı toplamı verirler, rtp = baseRtp+jackpotRtp+linkRtp+bellRtp+fsRtp)
   readonly baseRtp: number
-  /// Normal spine düşen jackpotların katkısı (link hücre jackpotları linkRtp içinde)
+  /// Normal spine düşen jackpotların katkısı (link/çan hücre jackpotları ilgili Rtp içinde)
   readonly jackpotRtp: number
   readonly linkRtp: number
+  /// Çan respin bonusu katkısı (Faz 10)
+  readonly bellRtp: number
   readonly freeSpinsRtp: number
   /// Kazançlı tur oranı
   readonly hitRate: number
@@ -33,10 +35,13 @@ export interface SimStats {
   readonly stdevX: number
   /// Tetikleme frekansları: 1/N turda bir
   readonly linkTriggerEvery: number | null
+  readonly bellTriggerEvery: number | null
   readonly freeSpinTriggerEvery: number | null
   readonly freeSpinRetriggers: number
   /// Link bonusu başına ortalama dolan hücre
   readonly linkAvgCells: number
+  /// Çan bonusu başına ortalama dolan hücre
+  readonly bellAvgCells: number
   /// Normal spinde jackpot düşen tur sayısı (1/N)
   readonly jackpotDrops: number
   readonly jackpotsWon: Readonly<Record<JackpotTier, number>>
@@ -45,8 +50,8 @@ export interface SimStats {
 }
 
 /**
- * Monte Carlo RTP/volatilite simülasyonu — TÜM turu (base + link + FS)
- * çalıştırır ve RTP'yi katkısına göre ayrıştırır.
+ * Monte Carlo RTP/volatilite simülasyonu — TÜM turu (base + link + çan
+ * + jackpot + FS) çalıştırır ve RTP'yi katkısına göre ayrıştırır.
  */
 export function simulate(config: GameConfig, opts: SimOptions): SimStats {
   const { spins, seed, bet } = opts
@@ -59,6 +64,7 @@ export function simulate(config: GameConfig, opts: SimOptions): SimStats {
   let baseWin = 0
   let jackpotWin = 0
   let linkWin = 0
+  let bellWin = 0
   let fsWin = 0
   let jackpotDrops = 0
   let hitSpins = 0
@@ -68,8 +74,10 @@ export function simulate(config: GameConfig, opts: SimOptions): SimStats {
   let sumX = 0
   let sumXX = 0
   let linkTriggers = 0
+  let bellTriggers = 0
   let fsTriggers = 0
   let linkCells = 0
+  let bellCells = 0
   let retriggers = 0
   const jackpotsWon: Record<JackpotTier, number> = {
     mini: 0,
@@ -94,6 +102,12 @@ export function simulate(config: GameConfig, opts: SimOptions): SimStats {
       linkTriggers++
       linkCells += round.link.cells.length
       for (const tier of round.link.jackpots) jackpotsWon[tier]++
+    }
+    if (round.bell) {
+      bellWin += round.bell.totalWin
+      bellTriggers++
+      bellCells += round.bell.cells.length
+      for (const tier of round.bell.jackpots) jackpotsWon[tier]++
     }
     if (round.freeSpins) {
       fsWin += round.freeSpins.totalWin
@@ -124,7 +138,7 @@ export function simulate(config: GameConfig, opts: SimOptions): SimStats {
   }
 
   const totalBet = spins * bet
-  const totalWin = baseWin + jackpotWin + linkWin + fsWin
+  const totalWin = baseWin + jackpotWin + linkWin + bellWin + fsWin
   const meanX = sumX / spins
   const varianceX = Math.max(0, sumXX / spins - meanX * meanX)
 
@@ -138,15 +152,18 @@ export function simulate(config: GameConfig, opts: SimOptions): SimStats {
     baseRtp: baseWin / totalBet,
     jackpotRtp: jackpotWin / totalBet,
     linkRtp: linkWin / totalBet,
+    bellRtp: bellWin / totalBet,
     freeSpinsRtp: fsWin / totalBet,
     hitRate: hitSpins / spins,
     maxLosingStreak,
     maxWinX,
     stdevX: Math.sqrt(varianceX),
     linkTriggerEvery: linkTriggers > 0 ? spins / linkTriggers : null,
+    bellTriggerEvery: bellTriggers > 0 ? spins / bellTriggers : null,
     freeSpinTriggerEvery: fsTriggers > 0 ? spins / fsTriggers : null,
     freeSpinRetriggers: retriggers,
     linkAvgCells: linkTriggers > 0 ? linkCells / linkTriggers : 0,
+    bellAvgCells: bellTriggers > 0 ? bellCells / bellTriggers : 0,
     jackpotDrops,
     jackpotsWon,
     winBySymbol,
@@ -175,6 +192,7 @@ export function formatStats(stats: SimStats): string {
     `  base game : ${pct(stats.baseRtp)}`,
     `  jackpot   : ${pct(stats.jackpotRtp)}   düşüş ${every(stats.jackpotDrops > 0 ? stats.spins / stats.jackpotDrops : null)}`,
     `  link      : ${pct(stats.linkRtp)}   tetik ${every(stats.linkTriggerEvery)}  ort. ${stats.linkAvgCells.toFixed(1)} hücre`,
+    `  çan       : ${pct(stats.bellRtp)}   tetik ${every(stats.bellTriggerEvery)}  ort. ${stats.bellAvgCells.toFixed(1)} hücre`,
     `  freespins : ${pct(stats.freeSpinsRtp)}   tetik ${every(stats.freeSpinTriggerEvery)}  retrigger ${stats.freeSpinRetriggers}`,
     `Hit rate    : ${pct(stats.hitRate)}`,
     `Max win     : ${stats.maxWinX.toFixed(1)}× bahis`,

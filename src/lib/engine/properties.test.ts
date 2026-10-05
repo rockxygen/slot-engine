@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { ALLOWED_BETS } from '@/lib/api-types'
 import { CLOVER_LINK_BELLS as config } from './config'
 import { evaluateGrid } from './evaluate'
-import { SYMBOL_IDS, type SpinRound } from './types'
+import { SYMBOL_IDS, type GameConfig, type SpinRound } from './types'
 import { createRng, playRound } from './index'
 
 /// Faz 5 — PROPERTY-BASED TESTLER (fast-check)
@@ -31,6 +31,7 @@ const money = (r: SpinRound): number[] => [
   ...r.base.lineWins.map((w) => w.win),
   r.base.scatterWin?.win ?? 0,
   r.link?.totalWin ?? 0,
+  r.bell?.totalWin ?? 0,
   r.freeSpins?.totalWin ?? 0,
   ...(r.freeSpins?.spins.map((s) => s.win) ?? []),
 ]
@@ -58,7 +59,7 @@ describe('property: determinizm', () => {
 })
 
 describe('property: para sözleşmesi', () => {
-  it('totalWin = base + jackpot + link + freeSpins (kompozisyon)', () => {
+  it('totalWin = base + jackpot + link + bell + freeSpins (kompozisyon)', () => {
     fc.assert(
       fc.property(seedArb, betArb, (seed, bet) => {
         const r = round(seed, bet)
@@ -66,6 +67,7 @@ describe('property: para sözleşmesi', () => {
           r.base.totalWin +
           (r.jackpot?.win ?? 0) +
           (r.link?.totalWin ?? 0) +
+          (r.bell?.totalWin ?? 0) +
           (r.freeSpins?.totalWin ?? 0)
         expect(r.totalWin).toBe(parts)
       }),
@@ -181,6 +183,48 @@ describe('property: bonus yapısal bütünlüğü', () => {
         )
       }),
       { numRuns: 200 },
+    )
+  })
+
+  it('bell: totalWin = Σ hücre (× fullMultiplier tam dolulukta); grid sınırları', () => {
+    // Tetik eşiği 3'e düşürülür → üretilen turların ~%5'i çanlı olur
+    // (5'te nadir; property gerçekten bonusu görür). Değerler/çarpanlar
+    // ÜRETİM config'inden gelir.
+    const bellCfg: GameConfig = {
+      ...config,
+      bell: { ...config.bell, triggerCount: 3 },
+    }
+    fc.assert(
+      fc.property(seedArb, betArb, (seed, bet) => {
+        const r = playRound(bellCfg, createRng(seed), bet)
+        if (!r.bell) return
+        const sum = r.bell.cells.reduce(
+          (s, c) => s + Math.round(c.value * bet),
+          0,
+        )
+        expect(r.bell.totalWin).toBe(
+          r.bell.full ? sum * bellCfg.bell.fullMultiplier : sum,
+        )
+        expect(r.bell.triggerCount).toBeGreaterThanOrEqual(3)
+        expect(r.bell.cells.length).toBeLessThanOrEqual(bellCfg.bell.cellCount)
+        expect(r.bell.full).toBe(
+          r.bell.cells.length === bellCfg.bell.cellCount,
+        )
+        expect(r.totalWin).toBe(
+          r.base.totalWin +
+            (r.jackpot?.win ?? 0) +
+            (r.link?.totalWin ?? 0) +
+            r.bell.totalWin +
+            (r.freeSpins?.totalWin ?? 0),
+        )
+        for (const c of r.bell.cells) {
+          expect(c.reel).toBeGreaterThanOrEqual(0)
+          expect(c.reel).toBeLessThan(config.reelCount)
+          expect(c.row).toBeGreaterThanOrEqual(0)
+          expect(c.row).toBeLessThan(config.rows)
+        }
+      }),
+      { numRuns: 400 },
     )
   })
 })

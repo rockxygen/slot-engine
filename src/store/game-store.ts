@@ -49,7 +49,7 @@ function persistSoundPref(on: boolean): void {
 
 /// Sunucu/animasyon durumu — client SADECE durumu gösterir, matematik yapmaz.
 /// Para (balance) sunucudan gelir: `GET /api/state` + `POST /api/spin` yanıtı.
-export type Phase = 'idle' | 'spinning' | 'link' | 'freespins'
+export type Phase = 'idle' | 'spinning' | 'link' | 'bell' | 'freespins'
 
 interface GameState {
   /// Sunucu gerçeği (null = henüz yüklenmedi)

@@ -124,6 +124,7 @@ describe('playRound — spin jackpot düşüşü', () => {
         round.base.totalWin +
           round.jackpot!.win +
           (round.link?.totalWin ?? 0) +
+          (round.bell?.totalWin ?? 0) +
           (round.freeSpins?.totalWin ?? 0),
       )
     }

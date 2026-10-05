@@ -59,6 +59,24 @@ describe('config (şerit üretimi)', () => {
     expect(maxTotal).toBeGreaterThanOrEqual(CLOVER_LINK_BELLS.link.triggerCount + 1)
   })
 
+  it('grid EN AZ bell.triggerCount çan gösterebilmeli (aksi halde bonus ulaşılamaz)', () => {
+    // Çan bonusu (Faz 10): her makaranın en iyi penceresi en az 1 çan
+    // göstermeli → 5 makarada toplam en az 5 çan (eşik: 5).
+    let maxTotal = 0
+    for (const strip of CLOVER_LINK_BELLS.strips) {
+      let best = 0
+      for (let start = 0; start < strip.length; start++) {
+        let n = 0
+        for (let i = 0; i < CLOVER_LINK_BELLS.rows; i++) {
+          if (strip[(start + i) % strip.length] === 'bell') n++
+        }
+        if (n > best) best = n
+      }
+      maxTotal += best
+    }
+    expect(maxTotal).toBeGreaterThanOrEqual(CLOVER_LINK_BELLS.bell.triggerCount)
+  })
+
   it('çizgi indeksleri satır aralığında ve makara sayısı kadar', () => {
     for (const line of CLOVER_LINK_BELLS.lines) {
       expect(line).toHaveLength(CLOVER_LINK_BELLS.reelCount)

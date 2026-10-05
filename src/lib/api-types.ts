@@ -6,7 +6,11 @@ import type { SpinRound } from './engine'
 /// Bahis seçenekleri (minor birim) — sunucu DA bu listeden doğrular.
 export const ALLOWED_BETS = [100, 200, 500, 1000] as const
 
-export type SpinForce = 'link' | 'fs' | 'jackpot'
+export type SpinForce = 'link' | 'bell' | 'fs' | 'jackpot'
+
+/// Geçerli force değerleri — API doğrulaması ve istemci `?force=` okuması
+/// TEK listeden beslenir (sunucu 400 ile istemci kontrolü kaymaz).
+export const FORCE_VALUES = ['link', 'bell', 'fs', 'jackpot'] as const
 
 export interface SpinRequest {
   bet: number

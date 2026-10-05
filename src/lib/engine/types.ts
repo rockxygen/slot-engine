@@ -37,8 +37,9 @@ export interface ScatterRule {
 
 /// Jackpot kademeleri — sabit bahis katlarıyla öder (orantılı başlangıç:
 /// Mini→Grand artan çarpan, ağırlık tersine düşer).
-/// İki yerde kullanılır: normal spine düşüş (jackpot.spinChance) ve
-/// Link bonusu hücreleri (link.jackpotChance).
+/// Üç yerde kullanılır: normal spine düşüş (jackpot.spinChance), link
+/// bonusu hücreleri (link.jackpotChance) ve çan bonusu hücreleri
+/// (bell.jackpotChance) — hepsi `jackpot.tiers` tek kaynaktır.
 export type JackpotTier = 'mini' | 'minor' | 'maxi' | 'major' | 'grand'
 
 /// Kademe sunum sırası (prize bar, sim raporu, testler aynı sırayı paylaşır)
@@ -64,9 +65,15 @@ export interface JackpotConfig {
   readonly tiers: Readonly<Record<JackpotTier, JackpotRule>>
 }
 
-export interface LinkConfig {
+/// Kademe tablosunun **eski (Faz 9 öncesi)** biçimi: `maxi` kademesi henüz
+/// eklenmemişti → partial. `config.jackpot.tiers` (tam) bu tiptir.
+export type JackpotTierTable = Readonly<Partial<Record<JackpotTier, JackpotRule>>>
+
+/// Respin bonusunun ortak kuralları — Link (🪙) ve Çan (🔔) AYNI çekirdeği
+/// paylaşır; farklar config'tedir (tetik sembolü, değerler, tam çarpan).
+export interface RespinConfig {
   readonly symbol: SymbolId
-  /// Bu kadar + link sembolü griddeyse bonus tetiklenir
+  /// Bu kadar + sembol griddeyse bonus tetiklenir
   readonly triggerCount: number
   /// Her boş adımda sıfırlanan hak (başlangıç dahil)
   readonly respinCount: number
@@ -79,6 +86,19 @@ export interface LinkConfig {
   readonly jackpotChance: number
   /// Adımda eklenen sembol sayısı → ağırlık (0 = boş adım → hak azalır)
   readonly stepCounts: Readonly<Record<number, number>>
+  /// **Yalnızca Faz 9 öncesi snapshot'larda**: kademe tablosu eskiden
+  /// link'in ALTINDAYDI (`link.jackpots`, top-level `jackpot` anahtarı
+  /// henüz yoktu). Replay birebir sürsün diye eski yerinden okunur.
+  readonly jackpots?: JackpotTierTable
+}
+
+export type LinkConfig = RespinConfig
+
+/// Çan respin bonusu (Faz 10): 5+ çan → 3 hak, yeni çan hakları sıfırlar,
+/// 3 boş adımda toplanan tutar ödenir. 15 hücre dolarsa toplam
+/// `fullMultiplier` katı ödenir (15 çan → 3 katı).
+export interface BellConfig extends RespinConfig {
+  readonly fullMultiplier: number
 }
 
 export interface FreeSpinConfig {
@@ -105,8 +125,12 @@ export interface GameConfig {
   readonly paytable: Readonly<Partial<Record<SymbolId, PayRow>>>
   readonly scatter: ScatterRule
   readonly wild: SymbolId
+  /// Link respin bonusu (6+ 🪙) — Faz 2'den beri
   readonly link: LinkConfig
-  /// Jackpot: her normal spinde şanslı düşüş + link hücreleri ortak tablo
+  /// Çan respin bonusu (5+ 🔔) — Faz 10. Eski snapshot'larda ANAHTAR YOKTUR:
+  /// motor `bell` yokken RNG adımı harcamadan atlar (tarihsel akış korunur).
+  readonly bell: BellConfig
+  /// Jackpot: her normal spinde şanslı düşüş + link/çan hücreleri ortak tablo
   readonly jackpot: JackpotConfig
   readonly freeSpins: FreeSpinConfig
 }
@@ -141,8 +165,8 @@ export interface SpinResult {
   readonly totalWin: number
 }
 
-/// Link bonusunda tek bir sembolün yeri ve değeri
-export interface LinkCell {
+/// Respin bonusunda tek bir sembolün yeri ve değeri (link 🪙 ve çan 🔔 ortak)
+export interface RespinCell {
   readonly reel: number
   readonly row: number
   /// Bet çarpanı (0.5, 1, 2 … veya jackpot çarpanı)
@@ -152,24 +176,30 @@ export interface LinkCell {
 }
 
 /// Bonusun tek adım — render bu listeyi sırayla oynatır
-export interface LinkStep {
+export interface RespinStep {
   /// Bu adımda yerleştirilen semboller (steps[0] = tetikleyen semboller)
-  readonly added: readonly LinkCell[]
+  readonly added: readonly RespinCell[]
   /// Bu adımdan sonra kalan hak
   readonly respinsLeft: number
 }
 
-export interface LinkBonus {
+export interface RespinBonus {
   readonly triggerCount: number
-  readonly steps: readonly LinkStep[]
+  readonly steps: readonly RespinStep[]
   /// Turun sonundaki tüm semboller
-  readonly cells: readonly LinkCell[]
+  readonly cells: readonly RespinCell[]
   readonly jackpots: readonly JackpotTier[]
-  /// Toplam kazanç (minor birim)
+  /// Toplam kazanç (minor birim) — `full` ise × fullMultiplier uygulanmış hâli
   readonly totalWin: number
   /// 15 hücre tamamı doldu mu
   readonly full: boolean
 }
+
+/// Geriye dönük adlar (mevcut import'lar + bonusa özel okunabilirlik)
+export type LinkCell = RespinCell
+export type LinkStep = RespinStep
+export type LinkBonus = RespinBonus
+export type BellBonus = RespinBonus
 
 export interface FreeSpin {
   readonly index: number
@@ -200,9 +230,11 @@ export interface SpinRound {
   /// Normal spine şansla düşen jackpot (yoksa null)
   readonly jackpot: JackpotHit | null
   /// 6+ link sembolü varsa
-  readonly link: LinkBonus | null
+  readonly link: RespinBonus | null
+  /// 5+ çan sembolü varsa (Faz 10)
+  readonly bell: RespinBonus | null
   /// 3+ scatter varsa (FS içindeki scatter'lar ayrıca retrigger sayar)
   readonly freeSpins: FreeSpinGame | null
-  /// base + jackpot + link + freeSpins
+  /// base + jackpot + link + bell + freeSpins
   readonly totalWin: number
 }

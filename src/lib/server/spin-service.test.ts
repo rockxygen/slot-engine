@@ -153,6 +153,25 @@ describe('force (demo QA kapısı)', () => {
     expect(listRounds(db, sid)[0].forced).toBe('link')
   })
 
+  it('açıkken çan turlu tur döner: 5+ çan bonusu ve forced işareti', () => {
+    const { db, sid } = setup()
+    const out = performSpin(db, {
+      sessionId: sid,
+      bet: 200,
+      clientRequestId: nextReqId(),
+      force: 'bell',
+      allowForce: true,
+    })
+    expect(out.ok).toBe(true)
+    if (!out.ok) return
+    expect(out.round.bell).not.toBeNull()
+    expect(out.round.bell!.triggerCount).toBeGreaterThanOrEqual(
+      CLOVER_LINK_BELLS.bell.triggerCount,
+    )
+    expect(out.round.bell!.totalWin).toBeGreaterThan(0)
+    expect(listRounds(db, sid)[0].forced).toBe('bell')
+  })
+
   it('açıkken jackpot düşüşlü tur döner: kademe tabloda, ödül bet orantılı', () => {
     const { db, sid } = setup()
     const bet = 200

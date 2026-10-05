@@ -175,13 +175,14 @@ describe('playFreeSpins', () => {
 })
 
 describe('playRound (tur orkestrasyonu)', () => {
-  it('toplam = base + jackpot + link + freeSpins', () => {
+  it('toplam = base + jackpot + link + bell + freeSpins', () => {
     for (let i = 0; i < 200; i++) {
       const round = playRound(CLOVER_LINK_BELLS, createRng(`r${i}`), 200)
       const sum =
         round.base.totalWin +
         (round.jackpot?.win ?? 0) +
         (round.link?.totalWin ?? 0) +
+        (round.bell?.totalWin ?? 0) +
         (round.freeSpins?.totalWin ?? 0)
       expect(round.totalWin).toBe(sum)
       expect(round.bet).toBe(200)

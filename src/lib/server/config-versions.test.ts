@@ -18,6 +18,7 @@ import {
 } from './config-versions'
 import { openDb } from './db'
 import {
+  faz9RoundHash,
   legacyRoundHash,
   listRounds,
   performSpin,
@@ -271,6 +272,132 @@ describe('config versiyonlama (Faz 6)', () => {
       sessionId: SESSION,
       bet,
       clientRequestId: 'pre-faz9-req-000001',
+    })
+    expect(retry.ok).toBe(true)
+    if (retry.ok) expect(retry.round.totalWin).toBe(round.totalWin)
+    expect(getBalance(db, SESSION)).toBe(balBefore)
+  })
+
+  /// Faz 9 ÖNCESİ config'te kademe tablosu `link.jackpots` ALTINDAYDI
+  /// (top-level `jackpot` anahtarı henüz yoktu). Eski kod link bonusunu
+  /// bu tabloyla oynardı → bugünün kodu da oynayabilmeli. (Faz 10
+  /// bulgusu: `config.jackpot.tiers` koşulsuz okununca gerçek DB'deki
+  /// eski link turları replay'de ÇÖKÜYORDU — bu test regresyonudur.)
+  it('Faz 9 öncesi + link bonusu → eski link.jackpots tablosuyla replay (R1+R2)', () => {
+    const raw = JSON.parse(JSON.stringify(CLOVER_LINK_BELLS)) as Record<string, unknown>
+    delete raw.jackpot
+    delete raw.bell
+    // Eski kademe tablosu GERÇEK snapshot'tan kopyalandı:
+    // mini/minor/major/grand — `maxi` YOK (Faz 9'da eklendi)
+    const linkCfg = raw.link as Record<string, unknown>
+    linkCfg.jackpotChance = 1 // her hücre kademe → eski tablo kesin kullanılır
+    linkCfg.jackpots = {
+      mini: { weight: 45, multiplier: 10 },
+      minor: { weight: 35, multiplier: 20 },
+      major: { weight: 16, multiplier: 100 },
+      grand: { weight: 4, multiplier: 500 },
+    }
+    // Şerit: garanti 6+ link → bonus her turda tetiklenir
+    raw.strips = Array.from({ length: 5 }, () =>
+      Array.from({ length: 32 }, () => 'link'),
+    )
+    const cfg = raw as unknown as GameConfig
+    const oldCfgHash = writeSnapshot(cfg)
+
+    const db = openDb(':memory:')
+    createSession(db, SESSION)
+    const seed = 'pre-faz9-link-seed-01'
+    const bet = 200
+    const round = playRound(cfg, createRng(seed), bet)
+
+    // Bonus eski tabloyla ÖDENDİ (crash regresyonu + kademe doğruluğu)
+    expect(round.link).not.toBeNull()
+    expect(round.link!.triggerCount).toBe(15) // 15 link = tam doluluk
+    const legacyMultipliers: Record<string, number> = {
+      mini: 10,
+      minor: 20,
+      major: 100,
+      grand: 500,
+    }
+    for (const cell of round.link!.cells) {
+      expect(cell.tier).not.toBeNull()
+      expect(legacyMultipliers).not.toHaveProperty('maxi') // eski tabloda yok
+      expect(cell.value).toBe(legacyMultipliers[cell.tier as string])
+    }
+
+    db.prepare(
+      `INSERT INTO rounds
+         (session_id, client_request_id, seed, bet, win, balance_after,
+          round_hash, config_hash, forced, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+    ).run(
+      SESSION,
+      'pre-faz9-link-req-01',
+      seed,
+      bet,
+      round.totalWin,
+      getBalance(db, SESSION),
+      legacyRoundHash(round),
+      oldCfgHash,
+      Date.now(),
+    )
+
+    const findings = runAudit(db)
+    expect(auditFailed(findings)).toBe(false)
+    expect(findings.some((f) => f.check === 'R1' && f.ok)).toBe(true)
+    const row = listRounds(db, SESSION)[0]
+    expect(verifyRound(db, row.id).ok).toBe(true)
+  })
+
+  /// Faz 10, SpinRound'a `bell` alanı ekledi. Faz 9 döneminde oynanmış
+  /// kayıtlar: config'te `bell` ANAHTARI YOK, round_hash FAZ 9 JSON
+  /// şekliyle (jackpot var, bell yok) hesaplanmış. Bu turlar yeni koddan
+  /// da birebir doğrulanabilmeli — aksi halde denetim geçmişi silinirdi.
+  it('Faz 9 turu (bell yok + faz9 JSON şekli) → R1+R2+verifyRound geçer', () => {
+    const faz9 = JSON.parse(JSON.stringify(CLOVER_LINK_BELLS)) as Record<string, unknown>
+    delete faz9.bell
+    const cfg = faz9 as unknown as GameConfig
+    const oldCfgHash = writeSnapshot(cfg)
+
+    const db = openDb(':memory:')
+    createSession(db, SESSION)
+    const seed = 'faz9-round-seed-01'
+    const bet = 200
+    const round = playRound(cfg, createRng(seed), bet)
+    expect(round.bell).toBeNull() // eski config'te çan bonusu yok
+
+    db.prepare(
+      `INSERT INTO rounds
+         (session_id, client_request_id, seed, bet, win, balance_after,
+          round_hash, config_hash, forced, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+    ).run(
+      SESSION,
+      'faz9-req-0000001',
+      seed,
+      bet,
+      round.totalWin,
+      getBalance(db, SESSION),
+      faz9RoundHash(round), // FAZ 9 şekliyle hash'lendi (bell anahtarı yok)
+      oldCfgHash,
+      Date.now(),
+    )
+
+    // R1+R2: snapshot ile replay + faz9 şekil eşleşmesi
+    const findings = runAudit(db)
+    expect(auditFailed(findings)).toBe(false)
+    expect(findings.some((f) => f.check === 'R1' && f.ok)).toBe(true)
+
+    // verifyRound (tekil tur doğrulaması) aynı sonucu verir
+    const row = listRounds(db, SESSION)[0]
+    expect(verifyRound(db, row.id).ok).toBe(true)
+
+    // İdempotent retry: tur OYNANDIĞI config ile replay edilir
+    const balBefore = getBalance(db, SESSION)
+    const retry = performSpin(db, {
+      sessionId: SESSION,
+      bet,
+      clientRequestId: 'faz9-req-0000001',
     })
     expect(retry.ok).toBe(true)
     if (retry.ok) expect(retry.round.totalWin).toBe(round.totalWin)

@@ -5,6 +5,7 @@ import {
   JACKPOT_TIERS,
   createRng,
   spin,
+  type BellBonus,
   type FreeSpinGame,
   type JackpotHit,
   type LinkBonus,
@@ -39,8 +40,9 @@ type CellImage = Phaser.GameObjects.Image | null
  * Render sahnesi — matematik YAPMAZ.
  *
  * Veri akışı: store.spinId artınca `state.round` (SpinRound) alınır ve
- * sırayla oynatılır: base → link bonus → free spins. Sahne yalnızca
- * animasyon yapar; stageWin/settle ile HUD'u bilgilendirir.
+ * sırayla oynatılır: base → jackpot → link bonus → çan bonusu → free
+ * spins. Sahne yalnızca animasyon yapar; stageWin/settle ile HUD'u
+ * bilgilendirir.
  */
 export class GameScene extends Phaser.Scene {
   private reels: Phaser.GameObjects.Container[] = []
@@ -581,9 +583,11 @@ export class GameScene extends Phaser.Scene {
     chip?.setScale(1)
   }
 
-  private popLinkCell(cell: LinkCell): void {
+  private popRespinCell(cell: LinkCell, texture: string, ring = false): void {
     const { x, y } = cellCenter(cell.reel, cell.row)
-    const img = this.add.image(x, y, 'sym-link').setDepth(3).setScale(0)
+    const img = this.add.image(x, y, texture).setDepth(3).setScale(0)
+    // Çan hücresi inerken zil çalar (imza ses — link hücreleri sessiz)
+    if (ring) this.sfx('bell', { volume: 0.35, rate: 1.06 })
     const label = this.add
       .text(
         x,
@@ -624,7 +628,7 @@ export class GameScene extends Phaser.Scene {
     for (const step of link.steps) {
       this.setBanner(`RESPINS ${step.respinsLeft}`)
       for (const cell of step.added) {
-        this.popLinkCell(cell)
+        this.popRespinCell(cell, 'sym-link')
         await this.delay(150)
       }
       await this.delay(step.added.length > 0 ? 650 : 300)
@@ -640,6 +644,47 @@ export class GameScene extends Phaser.Scene {
 
     useGameStore.getState().stageWin(link.totalWin)
     await this.showWin(link.totalWin)
+    await this.delay(1400)
+
+    this.clearLinkOverlay()
+    this.setBanner('')
+  }
+
+  /// Çan respin bonusu (Faz 10) — link ile aynı ritim; farklar: çan
+  /// hücreleri zille iner ve 15 hücre dolduğunda ödül ×3 (fullMultiplier).
+  private async playBell(bell: BellBonus): Promise<void> {
+    this.sfx('bell', { volume: 0.85 })
+    this.setBanner('BELL BONUS!')
+    await this.delay(700)
+
+    for (const step of bell.steps) {
+      this.setBanner(`RESPINS ${step.respinsLeft}`)
+      for (const cell of step.added) {
+        this.popRespinCell(cell, 'sym-bell', true)
+        await this.delay(150)
+      }
+      await this.delay(step.added.length > 0 ? 650 : 300)
+    }
+
+    if (bell.jackpots.length > 0) {
+      this.sfx('jackpot', { volume: 0.8 })
+      this.setBanner(
+        `JACKPOT! ${bell.jackpots.map((t) => t.toUpperCase()).join(' + ')}`,
+      )
+      await this.delay(1000)
+    }
+
+    // 15 çan toplandı → toplamın 3 katı (fullMultiplier) kutlaması
+    if (bell.full) {
+      const mult = CLOVER_LINK_BELLS.bell.fullMultiplier
+      this.sfx('bigwin', { volume: 0.8 })
+      this.setBanner(`HEPSİ DOLU! ×${mult}`)
+      this.burst(CANVAS_W / 2, GRID_Y + GRID_H / 2, GOLD)
+      await this.delay(1200)
+    }
+
+    useGameStore.getState().stageWin(bell.totalWin)
+    await this.showWin(bell.totalWin)
     await this.delay(1400)
 
     this.clearLinkOverlay()
@@ -697,6 +742,11 @@ export class GameScene extends Phaser.Scene {
       if (round.link) {
         useGameStore.getState().setPhase('link')
         await this.playLink(round.link)
+      }
+
+      if (round.bell) {
+        useGameStore.getState().setPhase('bell')
+        await this.playBell(round.bell)
       }
 
       if (round.freeSpins) {

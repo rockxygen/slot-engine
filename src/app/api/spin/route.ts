@@ -11,6 +11,7 @@ import { LIMIT_LABELS } from '@/lib/server/limits'
 import { performSpin, type SpinFailureReason } from '@/lib/server/spin-service'
 import { getOrCreateSessionId } from '@/lib/server/session'
 import { recordReject, recordSpin } from '@/lib/server/telemetry'
+import { FORCE_VALUES } from '@/lib/api-types'
 
 function fail(
   status: number,
@@ -19,8 +20,6 @@ function fail(
 ): NextResponse<ApiErrorBody> {
   return NextResponse.json({ error, message }, { status })
 }
-
-const FORCE_VALUES: readonly SpinForce[] = ['link', 'fs', 'jackpot']
 
 function parseBody(raw: unknown): SpinRequest | null {
   if (typeof raw !== 'object' || raw === null) return null
@@ -138,6 +137,7 @@ export async function POST(
       bet: body.bet,
       win: outcome.round.totalWin,
       hasLink: outcome.round.link !== null,
+      hasBell: outcome.round.bell !== null,
       hasFs: outcome.round.freeSpins !== null,
       hasJackpot: outcome.round.jackpot !== null,
     })

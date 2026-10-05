@@ -138,13 +138,15 @@ export function Controls() {
         ? 'ÇEVİRİLİYOR…'
         : phase === 'link'
           ? 'LINK BONUS!'
-          : phase === 'freespins'
-            ? (fsLabel ?? 'BEDAVA DÖNÜŞLER')
-            : autoRunning
-              ? `OTOMATİK — ${autoRemaining} TUR`
-              : winShown > 0
-                ? 'KAZANÇ'
-                : 'HAZIR — ÇEVİR!'
+          : phase === 'bell'
+            ? 'ÇAN BONUSU!'
+            : phase === 'freespins'
+              ? (fsLabel ?? 'BEDAVA DÖNÜŞLER')
+              : autoRunning
+                ? `OTOMATİK — ${autoRemaining} TUR`
+                : winShown > 0
+                  ? 'KAZANÇ'
+                  : 'HAZIR — ÇEVİR!'
 
   return (
     <footer className="flex w-full max-w-[1080px] flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/10 bg-slate-900/70 p-4">

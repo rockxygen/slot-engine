@@ -207,42 +207,69 @@ Paranın tek kapısı sunucudur — istemcide matematik ve bakiye **yoktur**:
   replay eder. Test: `config-versions.test.ts → "Faz 9 öncesi tur … R1+R2
   +verifyRound geçer"` (gerçek DB'de `npm run audit` 66/66 ✓).
 
+## Çan respin bonusu (Faz 10)
+
+- **Ayrı ve bağımsız** ikinci Hold & Win bonusu (link bonusu aynen durur):
+  gridde **5+ çan** → **3 respin hakkı**; her **yeni çan** hakkı 3'e
+  sıfırlar, **3 boş adımda** tur kapanır ve toplanan çanların toplamı ödenir.
+- **Çanlara bet oranlı para**: hücre değeri = bet çarpanı (0.5×–10× arası
+  ağırlıklı); çanların içine **%2 şansla jackpot-kadeli çan** düşer —
+  mini/minor/maxi/major/grand = 10×/20×/50×/100×/500× (link ile **ortak**
+  `config.jackpot.tiers` tablosu).
+- **15 çan toplanırsa** (grid tamamen dolu) toplam ödül **×3**
+  (`bell.fullMultiplier`). stepCounts bilinçli boş ağırlıklı tutuldu: tam
+  doluluk nadirdir → ×3 gerçek bir "özel an" olsun.
+- **Sıra ve determinizm**: tur akışı base → jackpot → link → **çan** → FS;
+  eski config'te (`bell` anahtarı yok) bonus **hiç çizilmez ve RNG adımı
+  harcanmaz** (akış birebir aynı). Eski `round_hash`'ler `faz9RoundHash`
+  (bell anahtarsız JSON) ile 3. şekil olarak eşleşir; gerçek DB'deki
+  Faz 9 kayıtları `npm run audit` ile doğrulanmaya devam eder.
+  Testler: `bell.test.ts` (12), `config-versions.test.ts → "Faz 9 turu …"`,
+  `properties.test.ts` çan yapısı.
+- **Ops/QA**: `GET /api/telemetry → process.bellTriggers` · `/?force=bell`
+  ile bonus zorlanır. Kalibrasyon: [`docs/CALIBRATION.md`](docs/CALIBRATION.md)
+  (Tur 11) — kapı 2M'de TOPLAM %95.945, çan %1.65 (tetik 1/4049), Δ=0.
+
 ## Oyun kuralları (v1)
 
 - **5 makara × 3 satır, 20 çizgi, both-ways** (LTR + RTL), para **tamsayı**
   minor birimde (kuruş) — kayan nokta hatası yok.
 - **Wild** her sembolün yerine geçer; **scatter** gridde her yerde 3+ öder.
 - **Link respin bonusu**: 6+ `link` sembolü → 3 hak; dolu adımda hak sıfırlanır,
-  boş adımda azalır. Hücre değerleri bet çarpanıdır; %3 şansla jackpot kademesi
+  boş adımda azalır. Hücre değerleri bet çarpanıdır; %2 şansla jackpot kademesi
   (5 kademe, tek tablo) düşer.
+- **Çan respin bonusu (Faz 10)**: 5+ `bell` → 3 hak, yeni çanda hak 3'e sıfırlanır,
+  3 boş adımda toplanan çanların bet-oranlı toplamı ödenir; %2 şansla
+  jackpot-kadeli çan; **15 dolu → ödül ×3**. Link bonusundan bağımsızdır.
 - **Jackpot**: her normal spinde 1/10.000 şansla kademe düşer — ödül bahis
   orantılı (mini 10× · minor 20× · maxi 50× · major 100× · grand 500×);
   bedava dönüşlerde çizilmez.
 - **Free spins**: 3+ scatter → 13/19/26 dönüş, tüm kazançlar **×4**;
   FS içinde 3+ scatter **+5** (retrigger, toplam 50 ile sınırlı).
 
-## Kalibre edilmiş matematik (Faz 9 · RTP kapısı ölçümü)
+## Kalibre edilmiş matematik (Faz 10 · RTP kapısı ölçümü)
 
 | Metrik | Değer |
 | --- | --- |
-| **Toplam RTP** | **%96.22** (hedef %96.00 · kapı: 2.000.000 spin, seed `rtp-gate-1`) |
+| **Toplam RTP** | **%95.95** (hedef %96.00 · kapı: 2.000.000 spin, seed `rtp-gate-1`) |
 | base game | ~%59.8 |
-| **jackpot** | **~%0.55** · spin düşüşü **1/9.524** (spinChance 1/10.000) |
-| link bonusu | ~%12.5 · tetik **1/344** · ort. 14.2 hücre |
-| free spins | ~%23.4 · tetik **1/141** |
+| **jackpot** | **~%0.57** · spin düşüşü **1/9.346** (spinChance 1/10.000) |
+| link bonusu | ~%10.7 · tetik **1/344** · ort. 14.2 hücre |
+| **çan bonusu** | **~%1.65** · tetik **1/4.049** · ort. 12.1 hücre |
+| free spins | ~%23.2 · tetik **1/141** |
 | Hit rate | ~%47.0 |
-| Max win | ≥678× bahis (kapı bantı 500–1300) |
-| Volatilite (σ) | ~6.0× bahis |
+| Max win | ~1684× bahis (kapı bantı 500–2000 — çan full ×3 + grand çan) |
+| Volatilite (σ) | ~6.15× bahis |
 
-Jackpot öncesi 20M nihai doğrulama: %95.93 (base 59.8 / link 12.5 / fs 23.6).
-Ayrıntılar: [`docs/CALIBRATION.md`](docs/CALIBRATION.md)
+Faz 10 kalibrasyonu: [`docs/CALIBRATION.md`](docs/CALIBRATION.md) (Tur 11).
 
 ## Determinizm / denetim sözleşmesi
 
 1. `createRng(seed)` → aynı seed her platformda **aynı** sonuç zinciri üretir
    (salt 32-bit tamsayı aritmetiği).
-2. `playRound(config, rng, bet)` → base + jackpot + link + freeSpins **tek RNG
-   akışından** üretilir; sırası sabittir ve kayda girer.
+2. `playRound(config, rng, bet)` → base + jackpot + link + **bell** + freeSpins
+   **tek RNG akışından** üretilir; sırası sabittir ve kayda girer. `config.bell`
+   yoksa (eski snapshot) çan adımı hiç çizilmez — akış birebir aynı kalır.
 3. Sunucu turu üretir, seed/sonuç zincirini hash'leyerek saklar → denetçi
    replay edebilir. İstemci sadece `SpinRound` verisini oynatır.
 
@@ -257,6 +284,7 @@ Ayrıntılar: [`docs/CALIBRATION.md`](docs/CALIBRATION.md)
 - [x] **Faz 7** — CERTIFICATION §7 boşlukları: entropi sağlığı, `doctor`, sorumlu oyun limitleri, WORM export, hesap/KYC
 - [x] **Faz 8** — Prosedürel ses (8 WAV), otomatik dönüş (10/25/50), görsel iyileştirme (bg/kart/kazanç parıltısı)
 - [x] **Faz 9** — Jackpot 5 kademe (Mini→Grand, bahis orantılı), her normal spine 1/10.000 şanslı düşüş, prize bar + kalibrasyon (kapı %96.22)
+- [x] **Faz 10** — Çan respin bonusu (5+ çan → 3 hak, yeni çanda reset, 15 dolu → ×3, jackpot-kadeli çanlar), ayrı ikinci Hold & Win + kalibrasyon (kapı %95.95)
 
 ### Demo istemci notları
 
@@ -264,7 +292,8 @@ Ayrıntılar: [`docs/CALIBRATION.md`](docs/CALIBRATION.md)
   yerel motor/simülasyon istemciden tamamen kaldırıldı (`demo-round.ts` silindi).
 - Bakiye sunucudur: açılışta `GET /api/state`, tur sonunda spin yanıtının
   `pendingBalance`'ı settle anında görünür olur → **sayfa yenilense de kalıcı**.
-- `/?force=link` · `/?force=fs` · `/?force=jackpot` → bonus/düşüş zorlar
+- `/?force=link` · `/?force=fs` · `/?force=jackpot` · `/?force=bell` →
+  bonus/düşüş zorlar
   (animasyon QA'sı için; jackpot araması 1/10.000 olduğundan geniş pencerede
   seed seçilir).
   İzin sunucuda: dev'de açık, `npm start`'te `SLOT_ALLOW_FORCE=1` gerekir;

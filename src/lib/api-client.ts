@@ -11,6 +11,7 @@ import type {
   SpinRequest,
   SpinResponse,
 } from './api-types'
+import { FORCE_VALUES } from './api-types'
 
 /**
  * Sunucu istemcisi — TÜRK istemci veri kaynağıdır.
@@ -69,12 +70,14 @@ export function newClientRequestId(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
-/// QA force parametresi (`/?force=link|fs|jackpot`) — değeri İSTEMCİDE okunur,
+/// QA force parametresi (`/?force=link|bell|fs|jackpot`) — değeri İSTEMCİDE okunur,
 /// ama izni SUNUCUDA (yalnızca demo ortamı açıksa tur gerçekten force'lenir).
 export function currentForce(): SpinForce | null {
   if (typeof window === 'undefined') return null
   const f = new URLSearchParams(window.location.search).get('force')
-  return f === 'link' || f === 'fs' || f === 'jackpot' ? f : null
+  return f !== null && (FORCE_VALUES as readonly string[]).includes(f)
+    ? (f as SpinForce)
+    : null
 }
 
 export async function requestSpin(

@@ -6,9 +6,11 @@ export { spinReels, toRows } from './reels'
 export { evaluateGrid } from './evaluate'
 export { spin } from './spin'
 export { playRound } from './round'
-export { playLinkBonus, playFreeSpins } from './bonus'
+export { playLinkBonus, playBellBonus, playFreeSpins } from './bonus'
 export { simulate, formatStats, type SimOptions, type SimStats } from './simulate'
 export type {
+  BellBonus,
+  BellConfig,
   Direction,
   FreeSpin,
   FreeSpinConfig,
@@ -24,6 +26,10 @@ export type {
   LinkConfig,
   LinkStep,
   PayRow,
+  RespinBonus,
+  RespinCell,
+  RespinConfig,
+  RespinStep,
   ScatterRule,
   ScatterWin,
   SpinResult,

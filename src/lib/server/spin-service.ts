@@ -53,10 +53,32 @@ export function legacyRoundHash(round: SpinRound): string {
   )
 }
 
-/// Replay çıktısı, kayıtlı hash'in GÜNCEL ya da Faz 9 öncesi şekliyle
-/// eşleşiyorsa doğrulanmıştır.
+/**
+ * Faz 9 tur şekli — `jackpot` VAR ama `bell` YOK (Faz 10 öncesi).
+ * Faz 9 ile 10 arasında oynanmış kayıtlar bu JSON şekliyle hash'lendi
+ * (anahtar sırası: bet, base, jackpot, link, freeSpins, totalWin).
+ */
+export function faz9RoundHash(round: SpinRound): string {
+  return sha256(
+    JSON.stringify({
+      bet: round.bet,
+      base: round.base,
+      jackpot: round.jackpot,
+      link: round.link,
+      freeSpins: round.freeSpins,
+      totalWin: round.totalWin,
+    }),
+  )
+}
+
+/// Replay çıktısı, kayıtlı hash'in GÜNCEL ya da tarihsel şekillerinden
+/// biriyle eşleşiyorsa doğrulanmıştır (alan eklendikçe liste büyür).
 export function matchesRoundHash(replayed: SpinRound, storedHash: string): boolean {
-  return roundHash(replayed) === storedHash || legacyRoundHash(replayed) === storedHash
+  return (
+    roundHash(replayed) === storedHash ||
+    faz9RoundHash(replayed) === storedHash ||
+    legacyRoundHash(replayed) === storedHash
+  )
 }
 
 /**
@@ -147,17 +169,30 @@ export interface PerformSpinOptions {
 /// Bonus turlu seed araması (demo QA). Seed'ler deterministiktir:
 /// `force-link-0`, `force-link-1` … Motoru DEĞİL, geçerli turlar
 /// arasından SEÇİM yapar. Bulamazsa null → çağırıcı normal seed kullanır.
-/// Jackpot ~1/10.000 olduğundan arama penceresi genişletilir.
+/// Pencere, tetik olasılığına göre (1−p)^N ≈ %99.9+ bulma oranı):
+/// jackpot ~1/10.000 → 100K · çan ~1/4.049 (Faz 10 ölçümü) → 30K ·
+/// link ~1/344, fs ~1/141 → 4K.
 function findForceSeed(
   force: SpinForce,
   bet: number,
-  attempts = force === 'jackpot' ? 100_000 : 4000,
+  attempts =
+    force === 'jackpot'
+      ? 100_000
+      : force === 'bell'
+        ? 30_000
+        : 4000,
 ): string | null {
   for (let i = 0; i < attempts; i++) {
     const seed = `force-${force}-${i}`
     const round = playRound(CLOVER_LINK_BELLS, createRng(seed), bet)
     const hit =
-      force === 'link' ? round.link : force === 'fs' ? round.freeSpins : round.jackpot
+      force === 'link'
+        ? round.link
+        : force === 'bell'
+          ? round.bell
+          : force === 'fs'
+            ? round.freeSpins
+            : round.jackpot
     if (hit) return seed
   }
   return null

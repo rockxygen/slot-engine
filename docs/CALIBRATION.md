@@ -17,15 +17,27 @@ değiştirildi, 500K–5M spin koşuldu, katkı payları ayrı ayrı okundu.
 | 8 | FS ödül 15→13 | **94.8%** (1M) | 60.0 | 12.4 | 22.4 | hedefin biraz altı |
 | 9 | link value ağırlıkları (ort. 1.585→1.625) | **96.18 / 95.54** (5M×2) | 59.8 | 12.5–12.8 | 23.3–23.6 | ✅ hedef oturdu |
 | 10 | **Faz 9: jackpot 5 kademe + spin düşüşü** (spinChance 1/10.000, tablo tek kaynak, E=48×) | **96.221%** (2M kapı) | 59.780 | 12.507 | 23.383 | jackpot bileşeni **0.551%** (düşüş 1/9524); bant %0.15–0.75 kilitli |
+| 11 | **Faz 10: çan respin bonusu eklendi** + link/bell jackpotChance %3→%2, bell values ort. 1.415×, bell stepCounts boş ağırlıklı | **95.945%** (2M kapı) | 59.784 | 10.700 | 23.238 | çan bileşeni **1.652%** (tetik 1/4049); bantlar yeniden kilitlendi ↓ |
 
-**Tur 10 notu**: Faz 9, jackpot ödülünü yalnızca Link bonusundan alıp her
-normal spine 1/10.000 şans olarak ekledi; kademe çarpanları (10/20/100/500×)
-aynı kaldı, `maxi 50×` eklendi ve tablo `config.jackpot.tiers` altında tek
-kaynağa taşındı. Toplam RTP'deki +0.29 puanlık artış **kasten** ve kapı
-bantlarının içinde (ödül ne oranda seyrekse katkı o kadar azalır:
-`katkı = spinChance × E[çarpan]`). Yeni bileşen `jackpotRtp` için kapıya
-ayrı bant (%0.15–0.75) eklendi; `bileşen toplamı` kontrolü artık
-`base+jackpot+link+fs` toplamını Δ<1e-9 ile zorlar.
+**Tur 11 notu (Faz 10)**: Hold & Win tarzı **ikinci, BAĞIMSIZ bonus** eklendi:
+gridde 5+ çan → 3 respin hakkı, her YENİ çan hakkı 3'e sıfırlar, 3 boş adımda
+toplanan çanların bet-oranlı toplamı ödenir; 15 hücre dolarsa ödül ×3
+(`fullMultiplier`); çanların içine %2 şansla jackpot-kadeli çan düşer
+(ortak `jackpot.tiers` tablosu). İlk ölçüm (values/link aynısı + link
+stepCounts) **99.269%** çıktı → çan + link birlikte ~3.3 puan aşıyordu.
+Dengeleme: link.jp %3→%2 (−1.9 puan), bell.jp %3→%2 (−0.5), bell values
+hafifletildi (−0.35), bell.stepCounts boş ağırlıklı yapıldı (tam doluluk
+nadirleşir → ×3 "özel an" olur, ort. hücre 14.1→12.1). Kapı bantları
+yeniden kilitlendi:
+
+- **link %11–14 → %10–13**: respin bütçesi iki bonus arasında paylaşıldı
+- **çan %1.1–2.4** (yeni bileşen bandı, ölçüm 1.652)
+- **çan tetik 1/2000–8000** (yeni, ölçüm 1/4049 — şerit ağırlığı 2 sabit
+  kaldı; ağırlık artırmak base bell paytablosunu da büyüttüğü için RTP
+  bütçesini dağıtmak values/jp/stepCounts kollarıyla yapıldı)
+- **max win 500–1300 → 500–2000×**: uç değer çan-full-grand çan bileşimiyle
+  ~1684× (çan full ×3 + grand 500× hücresi) — tasarım gereği yeni tepe
+- bileşen toplamı kontrolüne `bell` eklendi: `base+jackpot+link+bell+fs`
 
 ## Öğrenilen dersler (motor tasarımı için)
 
@@ -49,11 +61,14 @@ ayrı bant (%0.15–0.75) eklendi; `bileşen toplamı` kontrolü artık
   watermelon 3 · seven 2 · bell 2 · wild 1 · scatter 1 · **link 4**
 - both-ways: **açık** · 20 çizgi
 - FS: 13/19/26 dönüş, **×4**, retrigger +5 (cap 50)
-- Link: 6+ tetik, 3 hak, jackpotChance %3
+- Link: 6+ tetik, 3 hak, jackpotChance **%2**
+- Çan (Faz 10): **5+ tetik, 3 hak (yenide 3'e sıfırlar), jackpotChance %2**,
+  values ort. **1.415×** (0.5–10× arası, bet oranlı), stepCounts {0:45,
+  1:30, 2:18, 3:7} (boş ağırlıklı → full nadir), **full ×3**, tetik ~1/4049
 - Jackpot: **5 kademe tek tablo** — mini/minor/maxi/major/grand =
   10/20/50/100/500× (ağırlık 40/30/16/10/4, E=48×), **spinChance 1/10.000**
-  (her normal spin; link hücreleri ortak tabloyu kullanır)
+  (her normal spin; link/çan hücreleri ortak tabloyu kullanır)
 - Kapı bantları (`npm run gate`, seed `rtp-gate-1`, 2M): toplam
-  %95.40–96.60 · base %57.5–62.0 · **jackpot %0.15–0.75** · link %11–14 ·
-  fs %22–25.5 · hit %45–49 · link 1/280–430 · fs 1/115–175 ·
-  max win 500–1300× · σ 4.0–7.5
+  %95.40–96.60 · base %57.5–62.0 · **jackpot %0.15–0.75** · link **%10–13** ·
+  **çan %1.1–2.4** · fs %22–25.5 · hit %45–49 · link 1/280–430 ·
+  **çan 1/2000–8000** · fs 1/115–175 · **max win 500–2000×** · σ 4.0–7.5

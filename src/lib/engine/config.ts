@@ -1,6 +1,7 @@
 import { createRng, type Rng } from './rng'
 import {
   SYMBOL_IDS,
+  type BellConfig,
   type FreeSpinConfig,
   type GameConfig,
   type JackpotConfig,
@@ -31,9 +32,9 @@ const WEIGHTS: Readonly<Record<SymbolId, number>> = {
 
 /// Bonus tetikleyicileri şeritte EŞİT ARALIKLI durur. Rastgele shuffle'da
 /// semboller yığınlanır → 5+ scatter'da clamp'e takılan aşırı ödemeler
-/// çıkar. DİKKAT: `link` bilinçli olarak ARALIKLI DEĞİL — 6+ tetiklemesi
-/// için tek pencerede 2 link yakalanabilmesi gerekir; eşit aralık bunu
-/// imkânsız kılar (makara başına max 1 → gridde max 5).
+/// çıkar. DİKKAT: `link` ve `bell` bilinçli olarak ARALIKLI DEĞİL —
+/// 6+/5+ tetiklemesi için tek pencerede 2 sembol yakalanabilmesi gerekir;
+/// eşit aralık bunu imkânsız kılar (makara başına max 1 → gridde max 5).
 const SPREAD_SYMBOLS: ReadonlySet<SymbolId> = new Set(['wild', 'scatter'])
 
 /// `symbol`ün şeritteki tüm kopyalarını eşit aralıklı hedeflere yerleştirir
@@ -148,14 +149,36 @@ const JACKPOT: JackpotConfig = {
 /// boş adımda hak azalır, dolu adımda sıfırlanır. Değerler bet
 /// çarpanıdır; %3 hücre şansıyla jackpot kademesi düşer
 /// (kademe tablosu: `jackpot.tiers`).
+/// Link respin bonusu (Hold & Win tarzı): 6+ sembol → 3 hak,
+/// boş adımda hak azalır, dolu adımda sıfırlanır. Değerler bet
+/// çarpanıdır; %2 hücre şansıyla jackpot kademesi düşer
+/// (kademe tablosu: `jackpot.tiers`).
 const LINK: LinkConfig = {
   symbol: 'link',
   triggerCount: 6,
   respinCount: 3,
   cellCount: 15, // 5 makara × 3 satır
   values: { 0.5: 33, 1: 30, 2: 19, 3: 11, 5: 5, 10: 2 },
-  jackpotChance: 0.03,
+  jackpotChance: 0.02,
   stepCounts: { 0: 30, 1: 35, 2: 25, 3: 10 },
+}
+
+/// Çan respin bonusu (Faz 10 · Hold & Win): 5+ çan → 3 hak, her YENİ çan
+/// hakları 3'e sıfırlar, 3 boş adımda toplananların toplamı ödenir.
+/// Çanlara bet oranlı para tanımlanır (values = bet çarpanı → ağırlık) ve
+/// çanların içine %2 şansla jackpot kademeli çan düşer (jackpot.tiers).
+/// 15 hücrenin hepsi dolarsa toplam `fullMultiplier` (×3) ödenir.
+/// `stepCounts` link'ten bilinçli BOŞ ağırlıklı: tam doluluk nadir olsun
+/// ki ×3 SPECIAL bir an olsun (kalibrasyon: docs/CALIBRATION.md Tur 11).
+const BELL: BellConfig = {
+  symbol: 'bell',
+  triggerCount: 5,
+  respinCount: 3,
+  cellCount: 15, // 5 makara × 3 satır
+  values: { 0.5: 35, 1: 33, 2: 18, 3: 10, 5: 3, 10: 1 },
+  jackpotChance: 0.02,
+  stepCounts: { 0: 45, 1: 30, 2: 18, 3: 7 },
+  fullMultiplier: 3, // 15 çan toplanırsa ödülün 3 katı
 }
 
 /// Free spins: 3+ scatter → 13/19/26 dönüş, tüm kazançlar ×4.
@@ -177,6 +200,7 @@ export const CLOVER_LINK_BELLS: GameConfig = {
   scatter: { symbol: 'scatter', pays: { 3: 2, 4: 10, 5: 50 } },
   wild: 'wild',
   link: LINK,
+  bell: BELL,
   jackpot: JACKPOT,
   freeSpins: FREE_SPINS,
 }

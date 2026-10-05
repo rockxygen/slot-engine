@@ -6,8 +6,9 @@ import type {
   FreeSpin,
   GameConfig,
   JackpotTier,
-  LinkBonus,
-  LinkCell,
+  JackpotTierTable,
+  RespinBonus,
+  RespinCell,
 } from './types'
 
 /// `table` = {değer: ağırlık}; ağırlıklar arasından deterministik seçim
@@ -25,62 +26,87 @@ function pickWeighted(rng: Rng, table: Readonly<Record<number, number>>): number
   return entries[entries.length - 1][0]
 }
 
-/// Yerleştirilecek tek bir link sembolünün değerini üretir
-function drawLinkCell(
-  config: GameConfig,
+/// Respin bonusunun config'ten türeyen çalıştırma kuralları
+/// (link ve çan aynı çekirdeği paylaşır — sadece veri farklıdır)
+interface RespinRules {
+  readonly triggerCount: number
+  readonly respinCount: number
+  readonly cellCount: number
+  readonly values: Readonly<Record<number, number>>
+  readonly jackpotChance: number
+  readonly stepCounts: Readonly<Record<number, number>>
+  /// `full` olurken totalWin'e uygulanan çarpan (link: 1, çan: 3)
+  readonly fullMultiplier: number
+  /// Faz 9 öncesi config'te `link.jackpots` altındaki eski kademe tablosu
+  /// (top-level `jackpot` yokken bununla ödenir — replay birebirliği)
+  readonly jackpots?: JackpotTierTable
+}
+
+/// Yerleştirilecek tek bir respin sembolünün değerini üretir
+function drawRespinCell(
+  rules: RespinRules,
+  tiers: JackpotTierTable,
   rng: Rng,
   reel: number,
   row: number,
-): LinkCell {
-  const link = config.link
-  if (rng.next() < link.jackpotChance) {
+): RespinCell {
+  if (rng.next() < rules.jackpotChance) {
     // Kademe tablosu ortak: spin düşüşüyle aynı `jackpot.tiers`
-    const tier = pickJackpotTier(rng, config.jackpot.tiers)
-    return { reel, row, value: config.jackpot.tiers[tier].multiplier, tier }
+    // (eski config'te `link.jackpots`) — `tier` AYNI tablodan geldi → defined
+    const tier = pickJackpotTier(rng, tiers)
+    return { reel, row, value: tiers[tier]!.multiplier, tier }
   }
-  return { reel, row, value: pickWeighted(rng, link.values), tier: null }
+  return { reel, row, value: pickWeighted(rng, rules.values), tier: null }
 }
 
 /**
- * Link respin bonusu — Hold & Win tarzı.
+ * Respin bonusu çekirdeği — Hold & Win tarzı (link 🪙 ve çan 🔔 ortak).
  *
  * Kurallar:
- *  - `trigger` = tetikleyen sembollerin yerleri (6+), değerleri burada çizilir.
+ *  - `trigger` = tetikleyen sembollerin yerleri, değerleri burada çizilir.
  *  - `respinCount` hak ile başlanır; adımda ≥1 sembol gelirse hak yeniden
  *    `respinCount`'a döner, hiç gelmezse 1 azalır.
  *  - Tüm hücreler dolarsa (`full`) veya hak biterse tur kapanır.
  *  - Kazanç = Σ(sembol değeri × bet), jackpot kademeleri kendi çarpanıyla.
+ *  - `fullMultiplier > 1` ise (çan bonusu) toplam tam dolulukta
+ *    Σ × fullMultiplier olarak ödenir (15 çan → 3 katı).
  *
- * DETERMİNİZM: aynı (config, rng gidişatı, trigger) → aynı tur.
+ * DETERMİNİZM: aynı (rules, rng gidişatı, trigger) → aynı tur.
  * Sunucu tüm adımları üretir; istemci `steps`'i sırayla oynatır.
  */
-export function playLinkBonus(
+function playRespins(
   config: GameConfig,
+  rules: RespinRules,
   rng: Rng,
   bet: number,
   trigger: readonly { reel: number; row: number }[],
-): LinkBonus {
-  const link = config.link
-  if (trigger.length < link.triggerCount) {
+): RespinBonus {
+  if (trigger.length < rules.triggerCount) {
     throw new Error(
-      `Link bonusu tetiklenemedi: ${trigger.length} < ${link.triggerCount}`,
+      `Respin bonusu tetiklenemedi: ${trigger.length} < ${rules.triggerCount}`,
     )
   }
+  // Kademe tablosu: güncel config'te tek kaynak `jackpot.tiers`.
+  // Faz 9 öncesi snapshot'larda `jackpot` anahtarı YOKTUR ve tablo
+  // `link.jackpots` altındaydı — eski turlar oynandıkları tabloyla
+  // (aynı ağırlıklarla) birebir replay edilsin diye oradan okunur.
+  const tiers = config.jackpot?.tiers ?? rules.jackpots
+  if (!tiers) throw new Error('Respin bonusu: kademe tablosu bulunamadı')
 
   const occupied = new Set<string>()
   const mark = (c: { reel: number; row: number }) => `${c.reel}:${c.row}`
 
-  const cells: LinkCell[] = trigger.map((p) => {
-    const cell = drawLinkCell(config, rng, p.reel, p.row)
+  const cells: RespinCell[] = trigger.map((p) => {
+    const cell = drawRespinCell(rules, tiers, rng, p.reel, p.row)
     occupied.add(mark(cell))
     return cell
   })
 
-  const steps = [{ added: [...cells], respinsLeft: link.respinCount }]
-  let respinsLeft = link.respinCount
+  const steps = [{ added: [...cells], respinsLeft: rules.respinCount }]
+  let respinsLeft = rules.respinCount
 
-  while (respinsLeft > 0 && occupied.size < link.cellCount) {
-    const k = pickWeighted(rng, link.stepCounts)
+  while (respinsLeft > 0 && occupied.size < rules.cellCount) {
+    const k = pickWeighted(rng, rules.stepCounts)
     const empty: { reel: number; row: number }[] = []
     for (let reel = 0; reel < config.reelCount; reel++) {
       for (let row = 0; row < config.rows; row++) {
@@ -88,7 +114,7 @@ export function playLinkBonus(
       }
     }
 
-    const added: LinkCell[] = []
+    const added: RespinCell[] = []
     const take = Math.min(k, empty.length)
     for (let i = 0; i < take; i++) {
       // boş hücrelerden rastgele, tekrarsız seçim
@@ -96,22 +122,24 @@ export function playLinkBonus(
       const pos = empty[idx]
       empty[idx] = empty[empty.length - 1]
       empty.pop()
-      const cell = drawLinkCell(config, rng, pos.reel, pos.row)
+      const cell = drawRespinCell(rules, tiers, rng, pos.reel, pos.row)
       occupied.add(mark(cell))
       added.push(cell)
       cells.push(cell)
     }
 
-    respinsLeft = added.length > 0 ? link.respinCount : respinsLeft - 1
+    respinsLeft = added.length > 0 ? rules.respinCount : respinsLeft - 1
     steps.push({ added, respinsLeft })
   }
 
-  let totalWin = 0
+  let sum = 0
   const jackpots: JackpotTier[] = []
   for (const cell of cells) {
-    totalWin += Math.round(cell.value * bet)
+    sum += Math.round(cell.value * bet)
     if (cell.tier) jackpots.push(cell.tier)
   }
+  const full = occupied.size >= rules.cellCount
+  const totalWin = full ? sum * rules.fullMultiplier : sum
 
   return {
     triggerCount: trigger.length,
@@ -119,8 +147,44 @@ export function playLinkBonus(
     cells,
     jackpots,
     totalWin,
-    full: occupied.size >= link.cellCount,
+    full,
   }
+}
+
+/**
+ * Link respin bonusu (🪙) — 6+ sembol tetikler. Kurallar için
+ * `playRespins`'e bakın; link'te tam doluluk ekstra ödeme yapmaz
+ * (fullMultiplier = 1).
+ */
+export function playLinkBonus(
+  config: GameConfig,
+  rng: Rng,
+  bet: number,
+  trigger: readonly { reel: number; row: number }[],
+): RespinBonus {
+  const link = config.link
+  return playRespins(
+    config,
+    { ...link, fullMultiplier: 1 },
+    rng,
+    bet,
+    trigger,
+  )
+}
+
+/**
+ * Çan respin bonusu (🔔 · Faz 10) — 5+ çan tetikler, haklar yeni çanda
+ * 3'e sıfırlanır, 3 boş adımda toplanan tutar ödenir. Çan değerleri bet
+ * oranlıdır; %3 şansla jackpot kademeli çan (bet × kademe çarpanı) iner.
+ * 15 çanın hepsi toplanırsa ödül `fullMultiplier` (×3) katı ödenir.
+ */
+export function playBellBonus(
+  config: GameConfig,
+  rng: Rng,
+  bet: number,
+  trigger: readonly { reel: number; row: number }[],
+): RespinBonus {
+  return playRespins(config, config.bell, rng, bet, trigger)
 }
 
 const MAX_FS_SPINS = 50 // toplam retrigger guard'ı (sonsuz döngü imkânsız)
