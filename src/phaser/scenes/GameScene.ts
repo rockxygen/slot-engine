@@ -2,9 +2,11 @@ import Phaser from 'phaser'
 import { SOUND_NAMES, type SoundName } from '@/lib/audio/synth'
 import {
   CLOVER_LINK_BELLS,
+  JACKPOT_TIERS,
   createRng,
   spin,
   type FreeSpinGame,
+  type JackpotHit,
   type LinkBonus,
   type LinkCell,
   type SpinResult,
@@ -23,9 +25,11 @@ import {
   GRID_W,
   GRID_X,
   GRID_Y,
+  JACKPOT_BAR_Y,
   ROWS,
   SPIN_STRIPS,
   cellCenter,
+  jackpotChipX,
 } from '../layout'
 import { buildTextures } from '../textures'
 
@@ -45,6 +49,7 @@ export class GameScene extends Phaser.Scene {
   private winText!: Phaser.GameObjects.Text
   private winGlow!: Phaser.GameObjects.Image
   private banner!: Phaser.GameObjects.Text
+  private jackpotChips: Phaser.GameObjects.Image[] = []
   private linkOverlay: Phaser.GameObjects.GameObject[] = []
   private highlightTweens: Phaser.Tweens.Tween[] = []
   private highlightGlows: Phaser.GameObjects.Image[] = []
@@ -262,6 +267,12 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(20)
     this.winText.setShadow(0, 4, 'rgba(0, 0, 0, 0.7)', 12)
+
+    // Jackpot prize bar (Mini→Grand): makaranın altında sabit ödül sırası.
+    // Çipler bet'e orantılı ÇARPAN gösterir; düştüğünde burası parlar.
+    this.jackpotChips = JACKPOT_TIERS.map((tier, i) =>
+      this.add.image(jackpotChipX(i), JACKPOT_BAR_Y, `jp-${tier}`).setDepth(7),
+    )
   }
 
   // ────────────────────────────────────────────── statik grid
@@ -441,11 +452,14 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private showWin(amount: number): Promise<void> {
-    // Kazanç sesi: büyük kazanç fanfarı eşiği (5× bahis)
+  private showWin(amount: number, opts: { sound?: boolean } = {}): Promise<void> {
     const bet = useGameStore.getState().bet
-    if (amount >= bet * 5) this.sfx('bigwin', { volume: 0.75 })
-    else this.sfx('win', { volume: 0.6 })
+    // Kazanç sesi: büyük kazanç fanfarı eşiği (5× bahis)
+    // Jackpot düşüşünde fanfar zaten çaldı → opts.sound: false
+    if (opts.sound !== false) {
+      if (amount >= bet * 5) this.sfx('bigwin', { volume: 0.75 })
+      else this.sfx('win', { volume: 0.6 })
+    }
 
     // Kazanç ışıması + altın parıltı patlaması
     this.tweens.killTweensOf(this.winGlow)
@@ -539,6 +553,33 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ────────────────────────────────────────────── bonuslar
+
+  /// Normal spine düşen jackpot: kademe çipi parlar + fanfar + ödül sayımı
+  private async playSpinJackpot(hit: JackpotHit): Promise<void> {
+    useGameStore.getState().stageWin(hit.win)
+    this.sfx('jackpot', { volume: 0.85 })
+    this.setBanner(`JACKPOT! ${hit.tier.toUpperCase()}`)
+
+    const chip = this.jackpotChips[JACKPOT_TIERS.indexOf(hit.tier)]
+    let flash: Phaser.Tweens.Tween | null = null
+    if (chip) {
+      this.burst(chip.x, chip.y, GOLD)
+      flash = this.tweens.add({
+        targets: chip,
+        scale: { from: 1, to: 1.18 },
+        yoyo: true,
+        repeat: 15, // ~2,5 sn — ödül sayımını kapsar
+        duration: 160,
+      })
+    }
+
+    await this.delay(650)
+    await this.showWin(hit.win, { sound: false })
+    await this.delay(1100)
+
+    flash?.stop()
+    chip?.setScale(1)
+  }
 
   private popLinkCell(cell: LinkCell): void {
     const { x, y } = cellCenter(cell.reel, cell.row)
@@ -646,6 +687,11 @@ export class GameScene extends Phaser.Scene {
         await this.showWin(round.base.totalWin)
         await this.delay(700)
         this.stopHighlight()
+      }
+
+      // Jackpot — normal spine düşen kademe (link/FS'den ÖNCE, akış sırası)
+      if (round.jackpot) {
+        await this.playSpinJackpot(round.jackpot)
       }
 
       if (round.link) {

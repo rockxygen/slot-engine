@@ -69,12 +69,12 @@ export function newClientRequestId(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
-/// QA force parametresi (`/?force=link|fs`) — değeri İSTEMCİDE okunur,
+/// QA force parametresi (`/?force=link|fs|jackpot`) — değeri İSTEMCİDE okunur,
 /// ama izni SUNUCUDA (yalnızca demo ortamı açıksa tur gerçekten force'lenir).
 export function currentForce(): SpinForce | null {
   if (typeof window === 'undefined') return null
   const f = new URLSearchParams(window.location.search).get('force')
-  return f === 'link' || f === 'fs' ? f : null
+  return f === 'link' || f === 'fs' || f === 'jackpot' ? f : null
 }
 
 export async function requestSpin(

@@ -15,10 +15,12 @@ export interface SimStats {
   readonly bet: number
   readonly totalBet: number
   readonly totalWin: number
-  /// TOPLAM RTP = (base + link + freeSpins) / totalBet — hedef metrik
+  /// TOPLAM RTP = (base + jackpot + link + freeSpins) / totalBet — hedef metrik
   readonly rtp: number
-  /// Katkı payları (aynı toplamı verirler, rtp = baseRtp+linkRtp+fsRtp)
+  /// Katkı payları (aynı toplamı verirler, rtp = baseRtp+jackpotRtp+linkRtp+fsRtp)
   readonly baseRtp: number
+  /// Normal spine düşen jackpotların katkısı (link hücre jackpotları linkRtp içinde)
+  readonly jackpotRtp: number
   readonly linkRtp: number
   readonly freeSpinsRtp: number
   /// Kazançlı tur oranı
@@ -35,6 +37,8 @@ export interface SimStats {
   readonly freeSpinRetriggers: number
   /// Link bonusu başına ortalama dolan hücre
   readonly linkAvgCells: number
+  /// Normal spinde jackpot düşen tur sayısı (1/N)
+  readonly jackpotDrops: number
   readonly jackpotsWon: Readonly<Record<JackpotTier, number>>
   /// base satır kazançlarının sembol dağılımı (paytable kalibrasyonu için)
   readonly winBySymbol: Readonly<Partial<Record<SymbolId, number>>>
@@ -53,8 +57,10 @@ export function simulate(config: GameConfig, opts: SimOptions): SimStats {
 
   const rng = createRng(seed)
   let baseWin = 0
+  let jackpotWin = 0
   let linkWin = 0
   let fsWin = 0
+  let jackpotDrops = 0
   let hitSpins = 0
   let losingStreak = 0
   let maxLosingStreak = 0
@@ -65,13 +71,24 @@ export function simulate(config: GameConfig, opts: SimOptions): SimStats {
   let fsTriggers = 0
   let linkCells = 0
   let retriggers = 0
-  const jackpotsWon: Record<JackpotTier, number> = { mini: 0, minor: 0, major: 0, grand: 0 }
+  const jackpotsWon: Record<JackpotTier, number> = {
+    mini: 0,
+    minor: 0,
+    maxi: 0,
+    major: 0,
+    grand: 0,
+  }
   const winBySymbol: Partial<Record<SymbolId, number>> = {}
 
   for (let i = 0; i < spins; i++) {
     const round = playRound(config, rng, bet)
 
     baseWin += round.base.totalWin
+    if (round.jackpot) {
+      jackpotWin += round.jackpot.win
+      jackpotsWon[round.jackpot.tier]++
+      jackpotDrops++
+    }
     if (round.link) {
       linkWin += round.link.totalWin
       linkTriggers++
@@ -107,7 +124,7 @@ export function simulate(config: GameConfig, opts: SimOptions): SimStats {
   }
 
   const totalBet = spins * bet
-  const totalWin = baseWin + linkWin + fsWin
+  const totalWin = baseWin + jackpotWin + linkWin + fsWin
   const meanX = sumX / spins
   const varianceX = Math.max(0, sumXX / spins - meanX * meanX)
 
@@ -119,6 +136,7 @@ export function simulate(config: GameConfig, opts: SimOptions): SimStats {
     totalWin,
     rtp: totalWin / totalBet,
     baseRtp: baseWin / totalBet,
+    jackpotRtp: jackpotWin / totalBet,
     linkRtp: linkWin / totalBet,
     freeSpinsRtp: fsWin / totalBet,
     hitRate: hitSpins / spins,
@@ -129,6 +147,7 @@ export function simulate(config: GameConfig, opts: SimOptions): SimStats {
     freeSpinTriggerEvery: fsTriggers > 0 ? spins / fsTriggers : null,
     freeSpinRetriggers: retriggers,
     linkAvgCells: linkTriggers > 0 ? linkCells / linkTriggers : 0,
+    jackpotDrops,
     jackpotsWon,
     winBySymbol,
   }
@@ -154,13 +173,14 @@ export function formatStats(stats: SimStats): string {
     `Spin        : ${stats.spins.toLocaleString('tr-TR')}  seed="${stats.seed}"  bet=${money(stats.bet)} ₺`,
     `TOPLAM RTP  : ${pct(stats.rtp)}   (hedef %96.00)`,
     `  base game : ${pct(stats.baseRtp)}`,
+    `  jackpot   : ${pct(stats.jackpotRtp)}   düşüş ${every(stats.jackpotDrops > 0 ? stats.spins / stats.jackpotDrops : null)}`,
     `  link      : ${pct(stats.linkRtp)}   tetik ${every(stats.linkTriggerEvery)}  ort. ${stats.linkAvgCells.toFixed(1)} hücre`,
     `  freespins : ${pct(stats.freeSpinsRtp)}   tetik ${every(stats.freeSpinTriggerEvery)}  retrigger ${stats.freeSpinRetriggers}`,
     `Hit rate    : ${pct(stats.hitRate)}`,
     `Max win     : ${stats.maxWinX.toFixed(1)}× bahis`,
     `Volatilite  : σ = ${stats.stdevX.toFixed(2)}× bahis`,
     `Kayıpsız seri: ${stats.maxLosingStreak} tur`,
-    `Jackpotlar  : ${jackpots}`,
+    `Jackpotlar  : ${jackpots}   (spin düşüşü ${stats.jackpotDrops})`,
     `Toplam bahis : ${money(stats.totalBet)} ₺`,
     `Toplam kazanç: ${money(stats.totalWin)} ₺`,
     `Base RTP sembol payları:`,

@@ -17,7 +17,13 @@ import {
   resolveReplayConfig,
 } from './config-versions'
 import { openDb } from './db'
-import { performSpin, roundHash } from './spin-service'
+import {
+  legacyRoundHash,
+  listRounds,
+  performSpin,
+  roundHash,
+  verifyRound,
+} from './spin-service'
 import { createSession, getBalance } from './wallet'
 
 /// İzole snapshot dizini (configVersionsDir() çağrı anında okur)
@@ -210,5 +216,64 @@ describe('config versiyonlama (Faz 6)', () => {
     const findings = runAudit(db)
     const r2 = findings.find((f) => f.check === 'R2' && !f.ok)
     expect(r2?.detail).toContain('kayıp')
+  })
+
+  /// Faz 9, SpinRound'a `jackpot` alanı ekledi ve tur RNG akışına 1 adım
+  /// kattı. Eski (Faz 9 öncesi) kayıtlar: config'te jackpot ANAHTARI YOK,
+  /// round_hash ESKİ JSON şekliyle hesaplanmış. Bu turlar yeni koddan da
+  /// birebir doğrulanabilmeli — aksi halde denetim geçmişi silinirdi.
+  it('Faz 9 öncesi tur (jackpot yok + eski JSON şekli) → R1+R2+verifyRound geçer', () => {
+    const preFaz9 = JSON.parse(JSON.stringify(CLOVER_LINK_BELLS)) as Record<
+      string,
+      unknown
+    >
+    delete preFaz9.jackpot
+    const cfg = preFaz9 as unknown as GameConfig
+    const oldCfgHash = writeSnapshot(cfg)
+
+    const db = openDb(':memory:')
+    createSession(db, SESSION)
+    const seed = 'pre-faz9-seed-01'
+    const bet = 200
+    const round = playRound(cfg, createRng(seed), bet)
+    expect(round.jackpot).toBeNull() // eski config'te jackpot yok
+
+    db.prepare(
+      `INSERT INTO rounds
+         (session_id, client_request_id, seed, bet, win, balance_after,
+          round_hash, config_hash, forced, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+    ).run(
+      SESSION,
+      'pre-faz9-req-000001',
+      seed,
+      bet,
+      round.totalWin,
+      getBalance(db, SESSION),
+      legacyRoundHash(round), // ESKİ şekle göre hash'lendi
+      oldCfgHash,
+      Date.now(),
+    )
+
+    // R1+R2: snapshot ile replay + legacy şekil eşleşmesi
+    const findings = runAudit(db)
+    expect(auditFailed(findings)).toBe(false)
+    expect(findings.some((f) => f.check === 'R1' && f.ok)).toBe(true)
+
+    // verifyRound (tekil tur doğrulaması) aynı sonucu verir
+    const row = listRounds(db, SESSION)[0]
+    expect(verifyRound(db, row.id).ok).toBe(true)
+
+    // İdempotent retry: eski tur OYNANDIĞI config ile replay edilir →
+    // yanıt ledgertaki turun kendisi olur ve İKİNCİ KEZ para alınmaz
+    const balBefore = getBalance(db, SESSION)
+    const retry = performSpin(db, {
+      sessionId: SESSION,
+      bet,
+      clientRequestId: 'pre-faz9-req-000001',
+    })
+    expect(retry.ok).toBe(true)
+    if (retry.ok) expect(retry.round.totalWin).toBe(round.totalWin)
+    expect(getBalance(db, SESSION)).toBe(balBefore)
   })
 })

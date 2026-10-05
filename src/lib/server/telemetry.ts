@@ -16,6 +16,7 @@ interface ProcessCounters {
   winRounds: number
   linkTriggers: number
   fsTriggers: number
+  jackpots: number
   betTotal: number
   winTotal: number
   lastSpinAt: number | null
@@ -28,6 +29,7 @@ const counters: ProcessCounters = {
   winRounds: 0,
   linkTriggers: 0,
   fsTriggers: 0,
+  jackpots: 0,
   betTotal: 0,
   winTotal: 0,
   lastSpinAt: null,
@@ -40,6 +42,7 @@ export function recordSpin(e: {
   readonly win: number
   readonly hasLink: boolean
   readonly hasFs: boolean
+  readonly hasJackpot: boolean
 }): void {
   counters.spins++
   counters.betTotal += e.bet
@@ -47,6 +50,7 @@ export function recordSpin(e: {
   if (e.win > 0) counters.winRounds++
   if (e.hasLink) counters.linkTriggers++
   if (e.hasFs) counters.fsTriggers++
+  if (e.hasJackpot) counters.jackpots++
   counters.lastSpinAt = Date.now()
 }
 
@@ -65,6 +69,7 @@ export interface TelemetryReport {
     readonly winRounds: number
     readonly linkTriggers: number
     readonly fsTriggers: number
+    readonly jackpots: number
     readonly betTotal: number
     readonly winTotal: number
     readonly rtp: number | null
@@ -119,6 +124,7 @@ export function telemetryReport(db: DatabaseSync): TelemetryReport {
       winRounds: counters.winRounds,
       linkTriggers: counters.linkTriggers,
       fsTriggers: counters.fsTriggers,
+      jackpots: counters.jackpots,
       betTotal: counters.betTotal,
       winTotal: counters.winTotal,
       rtp: counters.betTotal > 0 ? counters.winTotal / counters.betTotal : null,
@@ -145,6 +151,7 @@ export function resetTelemetry(): void {
   counters.winRounds = 0
   counters.linkTriggers = 0
   counters.fsTriggers = 0
+  counters.jackpots = 0
   counters.betTotal = 0
   counters.winTotal = 0
   counters.lastSpinAt = null

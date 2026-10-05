@@ -20,7 +20,7 @@ function fail(
   return NextResponse.json({ error, message }, { status })
 }
 
-const FORCE_VALUES: readonly SpinForce[] = ['link', 'fs']
+const FORCE_VALUES: readonly SpinForce[] = ['link', 'fs', 'jackpot']
 
 function parseBody(raw: unknown): SpinRequest | null {
   if (typeof raw !== 'object' || raw === null) return null
@@ -139,6 +139,7 @@ export async function POST(
       win: outcome.round.totalWin,
       hasLink: outcome.round.link !== null,
       hasFs: outcome.round.freeSpins !== null,
+      hasJackpot: outcome.round.jackpot !== null,
     })
     return NextResponse.json({
       round: outcome.round,

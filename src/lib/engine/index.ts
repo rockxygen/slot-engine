@@ -14,6 +14,8 @@ export type {
   FreeSpinConfig,
   FreeSpinGame,
   GameConfig,
+  JackpotConfig,
+  JackpotHit,
   JackpotRule,
   JackpotTier,
   LineWin,
@@ -28,4 +30,4 @@ export type {
   SpinRound,
   SymbolId,
 } from './types'
-export { SYMBOL_IDS } from './types'
+export { SYMBOL_IDS, JACKPOT_TIERS } from './types'

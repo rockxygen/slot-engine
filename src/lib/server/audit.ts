@@ -1,7 +1,12 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { resolveReplayConfig } from './config-versions'
 import { openDb } from './db'
-import { replayRound, roundHash, type RoundRow } from './spin-service'
+import {
+  matchesRoundHash,
+  replayRound,
+  roundHash,
+  type RoundRow,
+} from './spin-service'
 import { listLedger } from './wallet'
 
 /// Denetim bulgusu — CLI raporlar, test doğrular.
@@ -49,12 +54,12 @@ export function runAudit(db: DatabaseSync): Finding[] {
     if (resolved.source === 'snapshot') viaSnapshot++
 
     comparable++
-    const replayedHash = roundHash(replayRound(r.seed, r.bet, resolved.config))
-    if (replayedHash !== r.round_hash) {
+    const regen = replayRound(r.seed, r.bet, resolved.config)
+    if (!matchesRoundHash(regen, r.round_hash)) {
       findings.push({
         check: 'R1',
         ok: false,
-        detail: `round #${r.id}: hash MISMATCH (${replayedHash.slice(0, 12)}… ≠ ${r.round_hash.slice(0, 12)}…) seed="${r.seed}" bet=${r.bet}`,
+        detail: `round #${r.id}: hash MISMATCH (${roundHash(regen).slice(0, 12)}… ≠ ${r.round_hash.slice(0, 12)}…) seed="${r.seed}" bet=${r.bet}`,
       })
     } else {
       replayed++

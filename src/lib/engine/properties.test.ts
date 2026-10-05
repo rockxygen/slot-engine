@@ -27,6 +27,7 @@ const round = (seed: string, bet: number): SpinRound =>
 const money = (r: SpinRound): number[] => [
   r.totalWin,
   r.base.totalWin,
+  r.jackpot?.win ?? 0,
   ...r.base.lineWins.map((w) => w.win),
   r.base.scatterWin?.win ?? 0,
   r.link?.totalWin ?? 0,
@@ -57,17 +58,34 @@ describe('property: determinizm', () => {
 })
 
 describe('property: para sözleşmesi', () => {
-  it('totalWin = base + link + freeSpins (kompozisyon)', () => {
+  it('totalWin = base + jackpot + link + freeSpins (kompozisyon)', () => {
     fc.assert(
       fc.property(seedArb, betArb, (seed, bet) => {
         const r = round(seed, bet)
         const parts =
           r.base.totalWin +
+          (r.jackpot?.win ?? 0) +
           (r.link?.totalWin ?? 0) +
           (r.freeSpins?.totalWin ?? 0)
         expect(r.totalWin).toBe(parts)
       }),
       { numRuns: 300 },
+    )
+  })
+
+  it('jackpot: tier kademe tablosunda, win = bet × multiplier (tamsayı, lineer)', () => {
+    fc.assert(
+      fc.property(seedArb, betArb, (seed, bet) => {
+        const r = round(seed, bet)
+        if (!r.jackpot) return
+        const rule = config.jackpot.tiers[r.jackpot.tier]
+        expect(rule).toBeDefined()
+        expect(r.jackpot.win).toBe(bet * rule.multiplier)
+        expect(Number.isInteger(r.jackpot.win)).toBe(true)
+        // Tur RNG akışı bet'ten bağımsız → aynı seed aynı kademeyi verir
+        expect(round(seed, bet * 4).jackpot?.tier).toBe(r.jackpot.tier)
+      }),
+      { numRuns: 400 },
     )
   })
 

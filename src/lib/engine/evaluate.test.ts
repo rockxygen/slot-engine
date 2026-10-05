@@ -27,13 +27,17 @@ const TEST_CONFIG: GameConfig = {
     cellCount: 15,
     values: { 1: 100 },
     jackpotChance: 0,
-    jackpots: {
+    stepCounts: { 0: 1 },
+  },
+  jackpot: {
+    spinChance: 0,
+    tiers: {
       mini: { weight: 1, multiplier: 10 },
       minor: { weight: 1, multiplier: 20 },
+      maxi: { weight: 1, multiplier: 50 },
       major: { weight: 1, multiplier: 100 },
       grand: { weight: 1, multiplier: 500 },
     },
-    stepCounts: { 0: 1 },
   },
   freeSpins: { award: { 3: 7, 4: 10, 5: 15 }, multiplier: 2, retriggerAward: 5 },
 }

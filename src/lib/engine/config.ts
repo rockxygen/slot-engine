@@ -1,5 +1,12 @@
 import { createRng, type Rng } from './rng'
-import { SYMBOL_IDS, type FreeSpinConfig, type GameConfig, type LinkConfig, type SymbolId } from './types'
+import {
+  SYMBOL_IDS,
+  type FreeSpinConfig,
+  type GameConfig,
+  type JackpotConfig,
+  type LinkConfig,
+  type SymbolId,
+} from './types'
 
 /// ============================================================
 /// Clover Link Bells — oyun matematiği (VERİ, kod değil)
@@ -119,9 +126,28 @@ const PAYTABLE = {
   cherry: { 3: 4, 4: 14, 5: 60 },
 } as const
 
+/// Jackpot (5 kademe) — ORANTILI başlangıç: ödül her zaman bet × çarpan.
+/// Tablo TEK KAYNAK: hem normal spin düşüşü (spinChance) hem Link bonusu
+/// hücreleri (link.jackpotChance) bu kademeleri kullanır.
+///
+/// Beklenen çarpan Σ(w×m)/Σw = 48× → 1/N spin RTP katkısı = spinChance×48
+/// (0.0001 → +%0.48 RTP; kapı kalibrasyonu docs/CALIBRATION.md'de).
+const JACKPOT: JackpotConfig = {
+  /// ~1/10.000 normal spinde bir kademe düşer (RTP katkısı ≈ +%0.48)
+  spinChance: 0.0001,
+  tiers: {
+    mini: { weight: 40, multiplier: 10 },
+    minor: { weight: 30, multiplier: 20 },
+    maxi: { weight: 16, multiplier: 50 },
+    major: { weight: 10, multiplier: 100 },
+    grand: { weight: 4, multiplier: 500 },
+  },
+}
+
 /// Link respin bonusu (Hold & Win tarzı): 6+ sembol → 3 hak,
 /// boş adımda hak azalır, dolu adımda sıfırlanır. Değerler bet
-/// çarpanıdır; çok küçük bir şansla jackpot kademesi düşer.
+/// çarpanıdır; %3 hücre şansıyla jackpot kademesi düşer
+/// (kademe tablosu: `jackpot.tiers`).
 const LINK: LinkConfig = {
   symbol: 'link',
   triggerCount: 6,
@@ -129,12 +155,6 @@ const LINK: LinkConfig = {
   cellCount: 15, // 5 makara × 3 satır
   values: { 0.5: 33, 1: 30, 2: 19, 3: 11, 5: 5, 10: 2 },
   jackpotChance: 0.03,
-  jackpots: {
-    mini: { weight: 45, multiplier: 10 },
-    minor: { weight: 35, multiplier: 20 },
-    major: { weight: 16, multiplier: 100 },
-    grand: { weight: 4, multiplier: 500 },
-  },
   stepCounts: { 0: 30, 1: 35, 2: 25, 3: 10 },
 }
 
@@ -157,6 +177,7 @@ export const CLOVER_LINK_BELLS: GameConfig = {
   scatter: { symbol: 'scatter', pays: { 3: 2, 4: 10, 5: 50 } },
   wild: 'wild',
   link: LINK,
+  jackpot: JACKPOT,
   freeSpins: FREE_SPINS,
 }
 

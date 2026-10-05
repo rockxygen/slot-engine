@@ -17,9 +17,9 @@ const SESSION = 'telemetry-sess-1'
 describe('telemetri (Faz 6)', () => {
   it('süreç sayaçları: spin/trigger/reddetme sayaçları ve süreç RTP\'si', () => {
     resetTelemetry()
-    recordSpin({ bet: 200, win: 0, hasLink: false, hasFs: false })
-    recordSpin({ bet: 200, win: 1000, hasLink: true, hasFs: false })
-    recordSpin({ bet: 500, win: 500, hasLink: false, hasFs: true })
+    recordSpin({ bet: 200, win: 0, hasLink: false, hasFs: false, hasJackpot: false })
+    recordSpin({ bet: 200, win: 1000, hasLink: true, hasFs: false, hasJackpot: false })
+    recordSpin({ bet: 500, win: 500, hasLink: false, hasFs: true, hasJackpot: true })
     recordReject('insufficient_balance')
     recordReject('insufficient_balance')
     recordReject('invalid_request')
@@ -31,6 +31,7 @@ describe('telemetri (Faz 6)', () => {
     expect(r.process.winRounds).toBe(2)
     expect(r.process.linkTriggers).toBe(1)
     expect(r.process.fsTriggers).toBe(1)
+    expect(r.process.jackpots).toBe(1)
     expect(r.process.betTotal).toBe(900)
     expect(r.process.winTotal).toBe(1500)
     expect(r.process.rtp).toBeCloseTo(1500 / 900, 10)

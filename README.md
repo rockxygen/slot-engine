@@ -11,7 +11,7 @@ motoru** ve Next.js 16 sarmalayıcısı. Hedef: **gerçek para / lisanslı** kul
 
 ```bash
 npm run dev        # Next.js geliştirme sunucusu
-npm test           # Vitest (149 test: RNG, motor, bonus, cüzdan, property, denetim, telemetri, limit, KYC, ses, UI)
+npm test           # Vitest (163 test: RNG, motor, jackpot, bonus, cüzdan, property, denetim, telemetri, limit, KYC, ses, UI)
 npm run typecheck  # tsc --noEmit
 npm run lint       # eslint
 npm run build && npm start   # üretim derlemesi + sunucu (http://localhost:3000)
@@ -39,9 +39,10 @@ src/lib/engine/          # SAF MOTOR (framework'süz, sunucu+istemci ortak)
   evaluate.ts            # Çizgi/scatter kazancı, wild substitution, both-ways
   spin.ts                # Tek spin (base grid)
   bonus.ts               # Link respin bonusu + Free spins serisi
-  round.ts               # playRound(): base → link → freeSpins orkestrasyonu
+  jackpot.ts             # 5 kademe + spin düşüşü (orantılı ödül: bet × k)
+  round.ts               # playRound(): base → jackpot → link → freeSpins
   simulate.ts / sim-cli  # Monte Carlo RTP harness'i (kalibrasyon aracı)
-  *.test.ts              # 47 test
+  *.test.ts              # 74 test
 
 src/lib/api-types.ts     # İstemci↔sunucu sözleşmesi (ALLOWED_BETS, SpinRequest/Response)
 src/lib/api-client.ts    # İstemci veri kaynağı: /api/state, /api/spin, /api/demo/refill
@@ -88,22 +89,24 @@ Paranın tek kapısı sunucudur — istemcide matematik ve bakiye **yoktur**:
   edilir, **ikinci bahis çekilmez**; aynı kimlik farklı bahisle → `409 conflict`.
 - **Replay denetimi**: `rounds` tablosu seed + `sha256(round)` + config hash
   tutar; `verifyRound()` yeniden üretip hash karşılaştırır (bozulma yakalanır).
-- **Force QA kapısı**: `?force=link|fs` değeri istemciden gelir ama izni
+- **Force QA kapısı**: `?force=link|fs|jackpot` değeri istemciden gelir ama izni
   sunucuda — development'ta açık, production'da yalnızca `SLOT_ALLOW_FORCE=1`.
   Kullanılan seed (`force-link-92` gibi) ve `forced` işareti kayda düşer.
 
 ## Regresyon kapıları ve property testler (Faz 5)
 
 - **Property-based test** (fast-check): tek örnek değil, rastgeel girdi
-  uzayı zorlar — determinizm, `totalWin = base+link+fs` kompozisyonu,
+  uzayı zorlar — determinizm, `totalWin = base+jackpot+link+fs` kompozisyonu,
   **lineer bahis ölçeklemesi** (`win(k·bet) = k·win(bet)` tam eşitlik —
   para kaçırıcı her yuvarlama hatası bu özelliği kırar), tamsayı/lineBet
-  katı para, link hücre toplamı, FS `result×çarpan`, RNG durum
-  geri yükleme (replay temeli) ve **cüzdan durum makinesi** (rastgeel
-  spin/refill/idempotency dizilerinde ledger invariantı her adımda).
+  katı para, jackpot kademe/çarpan sözleşmesi, link hücre toplamı, FS
+  `result×çarpan`, RNG durum geri yükleme (replay temeli) ve **cüzdan durum
+  makinesi** (rastgeel spin/refill/idempotency dizilerinde ledger invariantı
+  her adımda).
 - **RTP kapısı**: `npm run gate` → 2M spin, seed `rtp-gate-1`
   (deterministik = tekrarlanabilir); bantlar kalibrasyonla kilitli
-  (RTP %95.40–96.60, katkılar, hit, tetik frekansları, max win, σ).
+  (RTP %95.40–96.60, jackpot bileşeni %0.15–0.75, katkılar, hit, tetik
+  frekansları, max win, σ).
   Bant dışına çıkan her matematik değişikliği **exit 1 → CI düşer**
   (`.github/workflows/ci.yml`).
 - **Denetçi replay aracı**: `npm run audit` → tüm round'ları seed'den
@@ -123,7 +126,7 @@ Paranın tek kapısı sunucudur — istemcide matematik ve bakiye **yoktur**:
   snapshot yoksa **FAIL** (`config-versions.test.ts` — sahte içerik,
   bozuk dosya, eksik sürüm senaryoları dahil).
 - **Telemetri**: `GET /api/telemetry` → `process` (bu sürecin sayaçları:
-  tur, link/FS tetikleri, reddetmeler, süreç RTP'si) + `allTime`
+  tur, link/FS tetikleri, jackpot düşüşleri, reddetmeler, süreç RTP'si) + `allTime`
   (denetim DB'sinden: rounds, forced, bet/win, RTP, son tur) +
   `configHash`. `GET /api/health` → yazmasız liveness + canlı config
   parmak izi (deploy doğrulaması; 503 = DB erişilemez).
@@ -178,6 +181,32 @@ Paranın tek kapısı sunucudur — istemcide matematik ve bakiye **yoktur**:
   paneli/ayırıcıları, gloss'lu + accent kenarlı kartlar, kazançta altın
   çerçeve parıltısı + parıltı patlaması, banner pop, başlık nabzı.
 
+## Jackpot — 5 kademe (Faz 9)
+
+- **Mini · Minor · Maxi · Major · Grand** — ödül **orantılı** başlattı: her
+  zaman `bet × kademe çarpanı` = **10× · 20× · 50× · 100× · 500×**. Ağırlıklar
+  (40/30/16/10/4) küçük kademeleri sık, grand'ı nadir yapar (beklenen 48×).
+- **Her normal spine şans**: `jackpot.spinChance = 1/10.000` → jackpot, tur
+  RNG akışında base spin'den **sonra**, link/FS'den önce çizilir (sıra sabit
+  → seed zinciri ve replay'e dahil). Beklenen RTP katkısı ~+%0.5.
+- **Tek kademe tablosu** (`config.jackpot.tiers`): hem normal spin düşüşü
+  hem Link bonusu hücreleri (%3 şans) aynı kademeleri kullanır — simetri,
+  tek gerçek kaynağı.
+- **Prize bar**: makaranın altında 5 kademe göstergesi (`MINI 10×` …
+  `GRAND 500×`, kademe renginde) sabit durur; düştüğünde çip parlar +
+  `JACKPOT! KADEME` banner + fanfar + ödül sayımı. `SpinRound.jackpot`
+  sunucudan gelir, istemci yalnızca oynatır (client'ta matematik yok).
+- **Ops/QA**: `GET /api/telemetry → process.jackpots` · `/?force=jackpot`
+  ile düşüş zorlanır. Kalibrasyon: [`docs/CALIBRATION.md`](docs/CALIBRATION.md)
+  (Tur 10) — kapı 2M'de TOPLAM %96.22, jackpot %0.55 (1/9.524), Δ=0.
+- **Denetim geriye uyumluluğu**: SpinRound'a `jackpot` alanı eklenmesi ve
+  tur RNG akışına 1 adım eklenmesi Faz 9 öncesi kayıtları KIRMAZ — eski
+  config snapshot'larında jackpot çizimi adımsız atlanır (akış birebir aynı
+  kalır), eski `round_hash`'ler `legacyRoundHash` ile (jackpot anahtarsız
+  JSON) karşılaştırılır; idempotent retry turu oynandığı config ile
+  replay eder. Test: `config-versions.test.ts → "Faz 9 öncesi tur … R1+R2
+  +verifyRound geçer"` (gerçek DB'de `npm run audit` 66/66 ✓).
+
 ## Oyun kuralları (v1)
 
 - **5 makara × 3 satır, 20 çizgi, both-ways** (LTR + RTL), para **tamsayı**
@@ -185,29 +214,34 @@ Paranın tek kapısı sunucudur — istemcide matematik ve bakiye **yoktur**:
 - **Wild** her sembolün yerine geçer; **scatter** gridde her yerde 3+ öder.
 - **Link respin bonusu**: 6+ `link` sembolü → 3 hak; dolu adımda hak sıfırlanır,
   boş adımda azalır. Hücre değerleri bet çarpanıdır; %3 şansla jackpot kademesi
-  (mini 10× · minor 20× · major 100× · grand 500×) düşer.
+  (5 kademe, tek tablo) düşer.
+- **Jackpot**: her normal spinde 1/10.000 şansla kademe düşer — ödül bahis
+  orantılı (mini 10× · minor 20× · maxi 50× · major 100× · grand 500×);
+  bedava dönüşlerde çizilmez.
 - **Free spins**: 3+ scatter → 13/19/26 dönüş, tüm kazançlar **×4**;
   FS içinde 3+ scatter **+5** (retrigger, toplam 50 ile sınırlı).
 
-## Kalibre edilmiş matematik (20M spin nihai doğrulama)
+## Kalibre edilmiş matematik (Faz 9 · RTP kapısı ölçümü)
 
 | Metrik | Değer |
 | --- | --- |
-| **Toplam RTP** | **%95.93** (hedef %96.00 · 20.000.000 spin, seed `final-20m`) |
+| **Toplam RTP** | **%96.22** (hedef %96.00 · kapı: 2.000.000 spin, seed `rtp-gate-1`) |
 | base game | ~%59.8 |
-| link bonusu | ~%12.5 · tetik **1/338** · ort. 14.2 hücre |
-| free spins | ~%23.6 · tetik **1/140** |
+| **jackpot** | **~%0.55** · spin düşüşü **1/9.524** (spinChance 1/10.000) |
+| link bonusu | ~%12.5 · tetik **1/344** · ort. 14.2 hücre |
+| free spins | ~%23.4 · tetik **1/141** |
 | Hit rate | ~%47.0 |
-| Max win | ~1050× bahis |
-| Volatilite (σ) | ~5.8× bahis |
+| Max win | ≥678× bahis (kapı bantı 500–1300) |
+| Volatilite (σ) | ~6.0× bahis |
 
+Jackpot öncesi 20M nihai doğrulama: %95.93 (base 59.8 / link 12.5 / fs 23.6).
 Ayrıntılar: [`docs/CALIBRATION.md`](docs/CALIBRATION.md)
 
 ## Determinizm / denetim sözleşmesi
 
 1. `createRng(seed)` → aynı seed her platformda **aynı** sonuç zinciri üretir
    (salt 32-bit tamsayı aritmetiği).
-2. `playRound(config, rng, bet)` → base + link + freeSpins **tek RNG
+2. `playRound(config, rng, bet)` → base + jackpot + link + freeSpins **tek RNG
    akışından** üretilir; sırası sabittir ve kayda girer.
 3. Sunucu turu üretir, seed/sonuç zincirini hash'leyerek saklar → denetçi
    replay edebilir. İstemci sadece `SpinRound` verisini oynatır.
@@ -222,6 +256,7 @@ Ayrıntılar: [`docs/CALIBRATION.md`](docs/CALIBRATION.md)
 - [x] **Faz 6** — Telemetri, config versiyonlama, yayın (`npm run release`, `docs/DEPLOYMENT.md`)
 - [x] **Faz 7** — CERTIFICATION §7 boşlukları: entropi sağlığı, `doctor`, sorumlu oyun limitleri, WORM export, hesap/KYC
 - [x] **Faz 8** — Prosedürel ses (8 WAV), otomatik dönüş (10/25/50), görsel iyileştirme (bg/kart/kazanç parıltısı)
+- [x] **Faz 9** — Jackpot 5 kademe (Mini→Grand, bahis orantılı), her normal spine 1/10.000 şanslı düşüş, prize bar + kalibrasyon (kapı %96.22)
 
 ### Demo istemci notları
 
@@ -229,7 +264,9 @@ Ayrıntılar: [`docs/CALIBRATION.md`](docs/CALIBRATION.md)
   yerel motor/simülasyon istemciden tamamen kaldırıldı (`demo-round.ts` silindi).
 - Bakiye sunucudur: açılışta `GET /api/state`, tur sonunda spin yanıtının
   `pendingBalance`'ı settle anında görünür olur → **sayfa yenilense de kalıcı**.
-- `/?force=link` · `/?force=fs` → bonus turları zorlar (animasyon QA'sı için).
+- `/?force=link` · `/?force=fs` · `/?force=jackpot` → bonus/düşüş zorlar
+  (animasyon QA'sı için; jackpot araması 1/10.000 olduğundan geniş pencerede
+  seed seçilir).
   İzin sunucuda: dev'de açık, `npm start`'te `SLOT_ALLOW_FORCE=1` gerekir;
   gerçek para modunda bonusu **sunucu** belirler.
 - Smoke test: `window.__game` (store) ve `window.__phaser` (döngü dondurma)

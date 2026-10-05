@@ -1,9 +1,13 @@
 import type Phaser from 'phaser'
+import { CLOVER_LINK_BELLS, JACKPOT_TIERS } from '@/lib/engine'
 import {
   CANVAS_H,
   CANVAS_W,
   CELL_H,
   CELL_W,
+  JACKPOT_CHIP_H,
+  JACKPOT_CHIP_W,
+  JACKPOT_META,
   SYMBOL_META,
 } from './layout'
 
@@ -217,6 +221,73 @@ function buildCellGlow(tm: Phaser.Textures.TextureManager): void {
   ct.refresh()
 }
 
+/// Jackpot prize bar çipleri: kademe renginde plaka + isim + bahis katı
+/// (`MINI 10×` — ödül her zaman bet × bu kat; config'den okunur, kod değil).
+function buildJackpotChips(tm: Phaser.Textures.TextureManager): void {
+  const w = JACKPOT_CHIP_W
+  const h = JACKPOT_CHIP_H
+
+  for (const tier of JACKPOT_TIERS) {
+    const key = `jp-${tier}`
+    if (tm.exists(key)) continue
+    const ct = tm.createCanvas(key, w, h)
+    if (!ct) continue
+    const ctx = ct.context
+    const meta = JACKPOT_META[tier]
+    const mult = CLOVER_LINK_BELLS.jackpot.tiers[tier].multiplier
+    ctx.clearRect(0, 0, w, h)
+
+    // Plaka gövdesi (kademe rengi gradient + gölge)
+    ctx.save()
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.5)'
+    ctx.shadowBlur = 6
+    ctx.shadowOffsetY = 2
+    roundRect(ctx, 1.5, 1.5, w - 3, h - 4, 8)
+    const g = ctx.createLinearGradient(0, 0, 0, h)
+    g.addColorStop(0, shade(meta.bg, 0.2))
+    g.addColorStop(0.55, meta.bg)
+    g.addColorStop(1, shade(meta.bg, -0.3))
+    ctx.fillStyle = g
+    ctx.fill()
+    ctx.restore()
+
+    // Kademe accent kenarı + iç ince halka
+    roundRect(ctx, 1.5, 1.5, w - 3, h - 4, 8)
+    ctx.lineWidth = 2
+    ctx.globalAlpha = 0.9
+    ctx.strokeStyle = meta.accent
+    ctx.stroke()
+    ctx.globalAlpha = 1
+    roundRect(ctx, 4.5, 4.5, w - 9, h - 10, 6)
+    ctx.lineWidth = 1
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)'
+    ctx.stroke()
+
+    // Metin: kademe adı (accent) + çarpan (altın), gölgeli ortalanır
+    const label = tier.toUpperCase()
+    const multText = `${mult}×`
+    ctx.font = 'bold 15px Arial, sans-serif'
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
+    const nameW = ctx.measureText(label).width
+    const gap = 8
+    const multW = ctx.measureText(multText).width
+    const startX = (w - (nameW + gap + multW)) / 2
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.65)'
+    ctx.shadowBlur = 3
+    ctx.shadowOffsetY = 1
+    ctx.fillStyle = meta.accent
+    ctx.fillText(label, startX, h / 2 + 1)
+    ctx.fillStyle = '#f5c542'
+    ctx.fillText(multText, startX + nameW + gap, h / 2 + 1)
+    ctx.shadowColor = 'transparent'
+    ctx.shadowBlur = 0
+    ctx.shadowOffsetY = 0
+
+    ct.refresh()
+  }
+}
+
 /**
  * Tüm oyun dokularını çalışma anında pişirir (dış dosya yok).
  * Kimlikler emoji'den gelir; zemin/accent renkleri SYMBOL_META'dan.
@@ -227,6 +298,7 @@ export function buildTextures(scene: Phaser.Scene): void {
   const tm = scene.textures
   buildBackground(tm)
   buildSymbolCards(tm)
+  buildJackpotChips(tm)
   buildSpark(tm)
   buildCellGlow(tm)
 }

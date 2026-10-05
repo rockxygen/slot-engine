@@ -6,7 +6,7 @@ import type { SpinRound } from './engine'
 /// Bahis seçenekleri (minor birim) — sunucu DA bu listeden doğrular.
 export const ALLOWED_BETS = [100, 200, 500, 1000] as const
 
-export type SpinForce = 'link' | 'fs'
+export type SpinForce = 'link' | 'fs' | 'jackpot'
 
 export interface SpinRequest {
   bet: number

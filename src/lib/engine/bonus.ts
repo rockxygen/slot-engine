@@ -1,3 +1,4 @@
+import { pickJackpotTier } from './jackpot'
 import { spin } from './spin'
 import type { Rng } from './rng'
 import type {
@@ -24,20 +25,6 @@ function pickWeighted(rng: Rng, table: Readonly<Record<number, number>>): number
   return entries[entries.length - 1][0]
 }
 
-function pickWeightedKey<T extends string>(
-  rng: Rng,
-  table: Readonly<Record<T, { weight: number }>>,
-): T {
-  const entries = Object.entries(table) as [T, { weight: number }][]
-  const total = entries.reduce((s, [, v]) => s + v.weight, 0)
-  let roll = rng.next() * total
-  for (const [key, rule] of entries) {
-    roll -= rule.weight
-    if (roll < 0) return key
-  }
-  return entries[entries.length - 1][0]
-}
-
 /// Yerleştirilecek tek bir link sembolünün değerini üretir
 function drawLinkCell(
   config: GameConfig,
@@ -47,8 +34,9 @@ function drawLinkCell(
 ): LinkCell {
   const link = config.link
   if (rng.next() < link.jackpotChance) {
-    const tier = pickWeightedKey(rng, link.jackpots) as JackpotTier
-    return { reel, row, value: link.jackpots[tier].multiplier, tier }
+    // Kademe tablosu ortak: spin düşüşüyle aynı `jackpot.tiers`
+    const tier = pickJackpotTier(rng, config.jackpot.tiers)
+    return { reel, row, value: config.jackpot.tiers[tier].multiplier, tier }
   }
   return { reel, row, value: pickWeighted(rng, link.values), tier: null }
 }

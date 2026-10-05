@@ -35,14 +35,33 @@ export interface ScatterRule {
   readonly pays: PayRow
 }
 
-/// Jackpot kademeleri — Link bonusunda sabit bahis katlarıyla öder
-export type JackpotTier = 'mini' | 'minor' | 'major' | 'grand'
+/// Jackpot kademeleri — sabit bahis katlarıyla öder (orantılı başlangıç:
+/// Mini→Grand artan çarpan, ağırlık tersine düşer).
+/// İki yerde kullanılır: normal spine düşüş (jackpot.spinChance) ve
+/// Link bonusu hücreleri (link.jackpotChance).
+export type JackpotTier = 'mini' | 'minor' | 'maxi' | 'major' | 'grand'
+
+/// Kademe sunum sırası (prize bar, sim raporu, testler aynı sırayı paylaşır)
+export const JACKPOT_TIERS: readonly JackpotTier[] = [
+  'mini',
+  'minor',
+  'maxi',
+  'major',
+  'grand',
+]
 
 export interface JackpotRule {
   /// Kademe ağırlığı (toplam jackpot şansının dağılımı)
   readonly weight: number
   /// Bet çarpanı (mini 10×, grand 500× gibi)
   readonly multiplier: number
+}
+
+export interface JackpotConfig {
+  /// Normal spin'de jackpot düşme olasılığı [0,1) — ödül bahis orantılıdır
+  readonly spinChance: number
+  /// Kademe tablosu: ağırlık + bet çarpanı (tek kaynak — hem spin hem link)
+  readonly tiers: Readonly<Record<JackpotTier, JackpotRule>>
 }
 
 export interface LinkConfig {
@@ -56,8 +75,8 @@ export interface LinkConfig {
   /// Normal sembol değeri → ağırlık (değer = bet çarpanı)
   readonly values: Readonly<Record<number, number>>
   /// Yerleşen bir sembolün jackpot KADEMESİ olma olasılığı [0,1)
+  /// (kademe tablosu `GameConfig.jackpot.tiers` — tek kaynak)
   readonly jackpotChance: number
-  readonly jackpots: Readonly<Record<JackpotTier, JackpotRule>>
   /// Adımda eklenen sembol sayısı → ağırlık (0 = boş adım → hak azalır)
   readonly stepCounts: Readonly<Record<number, number>>
 }
@@ -87,6 +106,8 @@ export interface GameConfig {
   readonly scatter: ScatterRule
   readonly wild: SymbolId
   readonly link: LinkConfig
+  /// Jackpot: her normal spinde şanslı düşüş + link hücreleri ortak tablo
+  readonly jackpot: JackpotConfig
   readonly freeSpins: FreeSpinConfig
 }
 
@@ -164,14 +185,24 @@ export interface FreeSpinGame {
   readonly retriggers: number
 }
 
+/// Normal spin içinde doğrudan düşen jackpot (tur RNG akışında
+/// base spin'den sonra, link bonusundan önce çizilir)
+export interface JackpotHit {
+  readonly tier: JackpotTier
+  /// bet × tier.multiplier (minor birim, her zaman tamsayı)
+  readonly win: number
+}
+
 /// Tek turun TAM sonucu (sunucu bunu üretir + kaydeder)
 export interface SpinRound {
   readonly bet: number
   readonly base: SpinResult
+  /// Normal spine şansla düşen jackpot (yoksa null)
+  readonly jackpot: JackpotHit | null
   /// 6+ link sembolü varsa
   readonly link: LinkBonus | null
   /// 3+ scatter varsa (FS içindeki scatter'lar ayrıca retrigger sayar)
   readonly freeSpins: FreeSpinGame | null
-  /// base + link + freeSpins
+  /// base + jackpot + link + freeSpins
   readonly totalWin: number
 }

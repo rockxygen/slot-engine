@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
+import { CLOVER_LINK_BELLS } from '@/lib/engine'
 import {
   listRounds,
   performSpin,
@@ -150,6 +151,25 @@ describe('force (demo QA kapısı)', () => {
     if (!out.ok) return
     expect(out.round.link).not.toBeNull()
     expect(listRounds(db, sid)[0].forced).toBe('link')
+  })
+
+  it('açıkken jackpot düşüşlü tur döner: kademe tabloda, ödül bet orantılı', () => {
+    const { db, sid } = setup()
+    const bet = 200
+    const out = performSpin(db, {
+      sessionId: sid,
+      bet,
+      clientRequestId: nextReqId(),
+      force: 'jackpot',
+      allowForce: true,
+    })
+    expect(out.ok).toBe(true)
+    if (!out.ok) return
+    expect(out.round.jackpot).not.toBeNull()
+    const rule = CLOVER_LINK_BELLS.jackpot.tiers[out.round.jackpot!.tier]
+    expect(rule).toBeDefined()
+    expect(out.round.jackpot!.win).toBe(bet * rule.multiplier)
+    expect(listRounds(db, sid)[0].forced).toBe('jackpot')
   })
 })
 

@@ -31,8 +31,10 @@ const stats = simulate(config, { spins, seed, bet })
 
 const checks: Check[] = [
   // ── RTP bantları (20M kalibrasyon: %95.93 / base %59.8 / link %12.5 / fs %23.6)
+  //    + jackpot bileşeni (5 kademe spin düşüşü — docs/CALIBRATION.md)
   { name: 'TOPLAM RTP', got: stats.rtp * 100, lo: 95.4, hi: 96.6, fmt: pct },
   { name: 'base RTP', got: stats.baseRtp * 100, lo: 57.5, hi: 62.0, fmt: pct },
+  { name: 'jackpot RTP', got: stats.jackpotRtp * 100, lo: 0.15, hi: 0.75, fmt: pct },
   { name: 'link RTP', got: stats.linkRtp * 100, lo: 11.0, hi: 14.0, fmt: pct },
   { name: 'freespins RTP', got: stats.freeSpinsRtp * 100, lo: 22.0, hi: 25.5, fmt: pct },
   // ── Oyun davranışı
@@ -58,7 +60,8 @@ const checks: Check[] = [
 
 /// Yapısal kontrol: bileşenler toplamı RTP'ye EŞİT (aynı paradır)
 const sumDelta = Math.abs(
-  stats.rtp - (stats.baseRtp + stats.linkRtp + stats.freeSpinsRtp),
+  stats.rtp -
+    (stats.baseRtp + stats.jackpotRtp + stats.linkRtp + stats.freeSpinsRtp),
 )
 const sumOk = sumDelta < 1e-9
 

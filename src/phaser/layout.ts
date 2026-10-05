@@ -1,4 +1,4 @@
-import type { SymbolId } from '@/lib/engine'
+import type { SymbolId, JackpotTier } from '@/lib/engine'
 
 /// Fiziksel sahne boyutu — Scale.FIT ile pencereye sığar
 export const CANVAS_W = 1080
@@ -27,6 +27,29 @@ export function cellCenter(col: number, row: number): { x: number; y: number } {
     x: GRID_X + col * CELL_W + CELL_W / 2,
     y: GRID_Y + row * CELL_H + CELL_H / 2,
   }
+}
+
+/// ── Jackpot prize bar (Mini→Grand) — makaranın ALTINDA sabit ödül sırası.
+/// Gösterilen değer bet'e orantılı ÇARPANDIR (ödül = bet × k); gerçek
+/// tutar düştüğünde banner + kazanç sayacında görünür.
+export const JACKPOT_BAR_Y = 687
+export const JACKPOT_CHIP_W = 184
+export const JACKPOT_CHIP_H = 30
+export const JACKPOT_CHIP_GAP = 20
+
+/// Sıradaki çipin merkezi x (bar yatayda ortalanır)
+export function jackpotChipX(index: number): number {
+  const total = 5 * JACKPOT_CHIP_W + 4 * JACKPOT_CHIP_GAP // 1000
+  return (CANVAS_W - total) / 2 + JACKPOT_CHIP_W / 2 + index * (JACKPOT_CHIP_W + JACKPOT_CHIP_GAP)
+}
+
+/// Kademe görsel kimliği (çip dokuları `textures.ts`'te bu renklerle pişirilir)
+export const JACKPOT_META: Record<JackpotTier, { bg: string; accent: string }> = {
+  mini: { bg: '#1e293b', accent: '#94a3b8' }, // gümüş
+  minor: { bg: '#14532d', accent: '#4ade80' }, // yeşil
+  maxi: { bg: '#1e3a8a', accent: '#60a5fa' }, // mavi
+  major: { bg: '#7f1d1d', accent: '#f87171' }, // kırmızı
+  grand: { bg: '#581c87', accent: '#f5c542' }, // mor + altın
 }
 
 /// Sembol sunumu: emoji + kart zemini (doku `textures.ts`'te pişirilir).

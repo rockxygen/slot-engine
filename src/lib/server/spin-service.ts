@@ -35,6 +35,31 @@ export function roundHash(round: SpinRound): string {
 }
 
 /**
+ * Faz 9 ÖNCESİ tur şekli — `jackpot` alanı olmadan üretilmiş JSON.
+ * Eski kayıtlar bu hâlde hash'lendi (round anahtarı sırası: bet, base,
+ * link, freeSpins, totalWin). Yeni koddan replay edilen eski tur,
+ * şekle normalize edilerek AYNI hash'e ulaşır → denetim geçmişe
+ * dokunmadan doğrulanmaya devam eder.
+ */
+export function legacyRoundHash(round: SpinRound): string {
+  return sha256(
+    JSON.stringify({
+      bet: round.bet,
+      base: round.base,
+      link: round.link,
+      freeSpins: round.freeSpins,
+      totalWin: round.totalWin,
+    }),
+  )
+}
+
+/// Replay çıktısı, kayıtlı hash'in GÜNCEL ya da Faz 9 öncesi şekliyle
+/// eşleşiyorsa doğrulanmıştır.
+export function matchesRoundHash(replayed: SpinRound, storedHash: string): boolean {
+  return roundHash(replayed) === storedHash || legacyRoundHash(replayed) === storedHash
+}
+
+/**
  * Denetçi replay'i: seed ile tur YENİDEN üretilir, hash karşılaştırılır.
  * Kayıt = sonuç DEĞİL, yeniden-üretilebilir kanıttır.
  *
@@ -76,7 +101,15 @@ export function verifyRound(
   const resolved = resolveReplayConfig(row.config_hash)
   if (!resolved) return { ok: false, row } // config kaybı → doğrulanamaz
   const replayed = replayRound(row.seed, row.bet, resolved.config)
-  return { ok: roundHash(replayed) === row.round_hash, row }
+  return { ok: matchesRoundHash(replayed, row.round_hash), row }
+}
+
+/// Kayıtlı turu OYNANDIĞI config ile yeniden üretir (idempotent
+/// yanıt): eski config snapshot'ı varsa onunla, yoksa güncelle.
+/// (Yanıt daima ledger'daki turun kendisi olmalı — bet/win değişmez.)
+function replayStored(row: RoundRow): SpinRound {
+  const resolved = resolveReplayConfig(row.config_hash)
+  return replayRound(row.seed, row.bet, resolved?.config ?? CLOVER_LINK_BELLS)
 }
 
 /// ────────────────────────────────── spin servisi
@@ -114,15 +147,17 @@ export interface PerformSpinOptions {
 /// Bonus turlu seed araması (demo QA). Seed'ler deterministiktir:
 /// `force-link-0`, `force-link-1` … Motoru DEĞİL, geçerli turlar
 /// arasından SEÇİM yapar. Bulamazsa null → çağırıcı normal seed kullanır.
+/// Jackpot ~1/10.000 olduğundan arama penceresi genişletilir.
 function findForceSeed(
   force: SpinForce,
   bet: number,
-  attempts = 4000,
+  attempts = force === 'jackpot' ? 100_000 : 4000,
 ): string | null {
   for (let i = 0; i < attempts; i++) {
     const seed = `force-${force}-${i}`
     const round = playRound(CLOVER_LINK_BELLS, createRng(seed), bet)
-    const hit = force === 'link' ? round.link : round.freeSpins
+    const hit =
+      force === 'link' ? round.link : force === 'fs' ? round.freeSpins : round.jackpot
     if (hit) return seed
   }
   return null
@@ -174,7 +209,7 @@ export function performSpin(
     if (existing.bet !== bet) return { ok: false, reason: 'request_conflict' }
     return {
       ok: true,
-      round: replayRound(existing.seed, existing.bet),
+      round: replayStored(existing),
       balance: getBalance(db, sessionId),
       roundId: existing.id,
     }
@@ -286,7 +321,7 @@ export function performSpin(
     if (dup && dup.bet === bet) {
       return {
         ok: true,
-        round: replayRound(dup.seed, dup.bet),
+        round: replayStored(dup),
         balance: getBalance(db, sessionId),
         roundId: dup.id,
       }

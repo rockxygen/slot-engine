@@ -3,7 +3,7 @@ import { CLOVER_LINK_BELLS } from './config'
 import { createRng } from './rng'
 import { playFreeSpins, playLinkBonus } from './bonus'
 import { playRound } from './round'
-import type { GameConfig, SymbolId } from './types'
+import { JACKPOT_TIERS, type GameConfig, type SymbolId } from './types'
 
 /// Şeridi test sembolleriyle dolduran test config'i
 /// (şerit en az `rows` uzunluğunda olmalı → yinelenecek)
@@ -100,9 +100,15 @@ describe('playLinkBonus (respins)', () => {
     const bonus = playLinkBonus(allJackpot, createRng('jp'), 100, trigger)
     for (const cell of bonus.cells) expect(cell.tier).not.toBeNull()
     expect(bonus.jackpots.length).toBe(bonus.cells.length)
-    // tier çarpanı config'den gelmeli
+    // tier çarpanı config'den gelmeli (tek kaynak: jackpot.tiers)
     for (const cell of bonus.cells) {
-      expect(cell.value).toBe(allJackpot.link.jackpots[cell.tier!].multiplier)
+      expect(cell.value).toBe(allJackpot.jackpot.tiers[cell.tier!].multiplier)
+    }
+    // 5 kademenin hepsi erişilebilir (mini→grand; maxi dahil)
+    const seen = new Set(bonus.cells.map((c) => c.tier))
+    expect(seen.size).toBeGreaterThan(1)
+    for (const t of JACKPOT_TIERS) {
+      expect(Object.keys(allJackpot.jackpot.tiers)).toContain(t)
     }
   })
 
@@ -169,11 +175,14 @@ describe('playFreeSpins', () => {
 })
 
 describe('playRound (tur orkestrasyonu)', () => {
-  it('toplam = base + link + freeSpins', () => {
+  it('toplam = base + jackpot + link + freeSpins', () => {
     for (let i = 0; i < 200; i++) {
       const round = playRound(CLOVER_LINK_BELLS, createRng(`r${i}`), 200)
       const sum =
-        round.base.totalWin + (round.link?.totalWin ?? 0) + (round.freeSpins?.totalWin ?? 0)
+        round.base.totalWin +
+        (round.jackpot?.win ?? 0) +
+        (round.link?.totalWin ?? 0) +
+        (round.freeSpins?.totalWin ?? 0)
       expect(round.totalWin).toBe(sum)
       expect(round.bet).toBe(200)
     }
